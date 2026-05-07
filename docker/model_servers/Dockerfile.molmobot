@@ -1,0 +1,53 @@
+# MolmoBot model server image (Molmo2-4B + DiT flow-matching action head).
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.molmobot \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-molmobot:local \
+#     .
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+# Copy harness source. molmobot.py's PEP 723 inline metadata references vla-eval
+# as an editable install at path "../../.." relative to the script, which
+# resolves to /workspace — so the source must be present before `uv run`.
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+
+# hatch-vcs reads the version from git tags; Docker builds have no .git.
+# Set a dummy version so hatchling skips the VCS lookup.
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+# Pre-install all dependencies declared in molmobot.py's inline metadata
+# (molmobot + molmo-spaces from GitHub, torch, transformers, vla-eval editable, …).
+# Running --help triggers uv to resolve and cache the isolated environment
+# without loading the model or touching the GPU.
+RUN uv run --python 3.11 src/vla_eval/model_servers/molmobot.py --help \
+    && rm -rf ~/.cache/pip
+
+# Default args match configs/model_servers/molmobot/droid.yaml.
+# Override via `docker compose` `command:` or CLI flags.
+ENTRYPOINT ["uv", "run", "--python", "3.11", "src/vla_eval/model_servers/molmobot.py"]
+CMD [ \
+    "--hf_repo",           "allenai/MolmoBot-DROID", \
+    "--execute_horizon",   "8", \
+    "--states_mode",       "cross_attn", \
+    "--max_joint_delta",   "0.2", \
+    "--primary_image_key", "exo_camera_1", \
+    "--wrist_image_key",   "wrist_camera", \
+    "--port",              "8000" \
+]

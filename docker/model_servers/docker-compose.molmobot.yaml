@@ -1,0 +1,56 @@
+# MolmoBot model server.
+#
+# MolmoBot targets DROID / real-robot scenarios; run the benchmark separately
+# on the host or in its own container and point it at this server.
+#
+# Start the server:
+#   docker compose -f docker/model_servers/docker-compose.molmobot.yaml up
+#
+# Then run the benchmark on the host:
+#   vla-eval run --config configs/... --server-url ws://localhost:8000
+
+services:
+  molmobot-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-molmobot:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.molmobot
+    ports:
+      - "8000:8000"
+    command:
+      - --hf_repo
+      - allenai/MolmoBot-DROID
+      - --execute_horizon
+      - "8"
+      - --states_mode
+      - cross_attn
+      - --max_joint_delta
+      - "0.2"
+      - --primary_image_key
+      - exo_camera_1
+      - --wrist_image_key
+      - wrist_camera
+      - --port
+      - "8000"
+    environment:
+      # Optional HuggingFace mirror, e.g. https://hf-mirror.com
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+    volumes:
+      # Mount only the HF model cache, not the entire ~/.cache.
+      # Mounting ~/.cache would shadow the uv environment baked into the image,
+      # forcing a re-install from PyPI on every start.
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      # Persist triton kernel cache across restarts (first inference compiles kernels).
+      - ~/.triton:/root/.triton
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]

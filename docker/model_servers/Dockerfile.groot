@@ -1,0 +1,55 @@
+# GR00T N1.6 model server image (Isaac-GR00T via trust_remote_code / Gr00tPolicy).
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.groot \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-groot:local \
+#     .
+#
+# Uses the CUDA *devel* image because flash-attn may need nvcc to compile if
+# no prebuilt wheel matches the installed torch/CUDA combination.
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+# Copy harness source. groot.py's PEP 723 inline metadata references vla-eval
+# as an editable install at path "../../.." relative to the script, which
+# resolves to /workspace — so the source must be present before `uv run`.
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+
+# hatch-vcs reads the version from git tags; Docker builds have no .git.
+# Set a dummy version so hatchling skips the VCS lookup.
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+# Pre-install all dependencies declared in groot.py's inline metadata
+# (gr00t from GitHub, flash-attn with no-build-isolation, torch, vla-eval editable, …).
+# Running --help triggers uv to resolve and cache the isolated environment
+# without loading the model or touching the GPU.
+# flash-attn compilation can take 10-20 minutes if no prebuilt wheel is found.
+RUN uv run --python 3.11 src/vla_eval/model_servers/groot.py --help \
+    && rm -rf ~/.cache/pip
+
+# Default args match configs/model_servers/groot/libero.yaml.
+# Override via `docker compose` `command:` or CLI flags.
+ENTRYPOINT ["uv", "run", "--python", "3.11", "src/vla_eval/model_servers/groot.py"]
+CMD [ \
+    "--model_path",      "0xAnkitSingh/GR00T-N1.6-LIBERO", \
+    "--embodiment_tag",  "LIBERO_PANDA", \
+    "--invert_gripper", \
+    "--chunk_size",      "16", \
+    "--port",            "8000" \
+]

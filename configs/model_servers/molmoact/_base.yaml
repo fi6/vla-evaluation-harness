@@ -1,0 +1,7 @@
+script: "src/vla_eval/model_servers/molmoact.py"
+args:
+  hf_repo: "allenai/MolmoAct-7B-D-0812"
+  unnorm_key: molmoact
+  chunk_size: 8
+  action_ensemble: newest
+  port: 8000

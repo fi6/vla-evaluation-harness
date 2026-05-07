@@ -1,0 +1,58 @@
+# GR00T model server + LIBERO benchmark — combined stack.
+#
+# Full eval (groot waits to load, then libero starts automatically):
+#   docker compose -f docker/model_servers/docker-compose.groot.yaml up
+#
+# Model server only (run the benchmark separately on the host):
+#   docker compose -f docker/model_servers/docker-compose.groot.yaml up groot-server
+
+services:
+  groot-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-groot:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.groot
+    ports:
+      - "8000:8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+    # The HTTP /config endpoint becomes available once the model is fully loaded.
+    # libero waits for this before starting.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      groot-server:
+        condition: service_healthy
+    # Entrypoint is already `conda run -n libero vla-eval`; override only the args.
+    # --server-url points to the groot-server service on the compose network.
+    # _inside_docker() is True here so vla-eval skips the Docker wrapper automatically.
+    command:
+      - run
+      - --config
+      - /workspace/configs/libero_10.yaml
+      - --server-url
+      - ws://groot-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]

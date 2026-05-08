@@ -78,6 +78,10 @@ class CogACTModelServer(PredictModelServer):
     def _load_model(self) -> None:
         if self._model is not None:
             return
+        import os
+
+        os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")  # suppress TF GPU init hang (transitive dep)
+
         import torch
         from vla import load_vla
 

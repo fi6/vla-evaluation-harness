@@ -27,7 +27,7 @@
 # starvla = { git = "https://github.com/starVLA/starVLA.git", rev = "eaa51c4c2f4012d42f1036ee318d41942e8f97a3" }
 #
 # [tool.uv]
-# exclude-newer = "2026-02-24T00:00:00Z"
+# exclude-newer = "2026-05-08T00:00:00Z"
 # ///
 """starVLA model server — supports all Qwen* frameworks.
 
@@ -182,6 +182,10 @@ class StarVLAModelServer(PredictModelServer):
         via ``huggingface_hub.snapshot_download``.  The first checkpoint
         file found under the ``checkpoints/`` sub-directory is returned.
         """
+        from vla_eval.dirs import require_model_available
+
+        require_model_available(checkpoint)
+
         path = Path(checkpoint)
         if path.is_file() and path.suffix in (".pt", ".safetensors"):
             return str(path)

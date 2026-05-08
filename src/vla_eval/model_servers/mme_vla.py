@@ -5,13 +5,13 @@
 #     "openpi",
 #     "numpy>=1.24",
 #     "huggingface_hub",
-#     "pytest",
-#     "chex",
+#     "pytest",  # not declared in openpi's deps but imported by openpi.models_pytorch
+#     "chex",    # not declared in openpi's deps but imported by openpi.models
 # ]
 #
 # [tool.uv.sources]
 # vla-eval = { path = "../../..", editable = true }
-# openpi = { git = "https://github.com/RoboMME/robomme_policy_learning.git", rev = "main" }
+# openpi = { git = "https://github.com/RoboMME/robomme_policy_learning.git", rev = "ecf086c3be7c2223167d9bb2f6ef1f0a6e24353b" }
 #
 # [tool.uv]
 # exclude-newer = "2026-04-06T00:00:00Z"
@@ -139,6 +139,10 @@ class MmeVlaModelServer(PredictModelServer):
         # Already a local path with params/
         if os.path.isdir(self.checkpoint) and os.path.isdir(os.path.join(self.checkpoint, "params")):
             return self.checkpoint
+
+        from vla_eval.dirs import require_model_available
+
+        require_model_available(self.checkpoint)
 
         from huggingface_hub import snapshot_download
 

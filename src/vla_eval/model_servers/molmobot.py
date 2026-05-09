@@ -80,6 +80,24 @@ class MolmoBotModelServer(ModelServer):
 
     # -- lifecycle --------------------------------------------------------
 
+    def _resolve_checkpoint(self) -> str:
+        """Resolve hf_repo to a local directory path.
+
+        SynthManipMolmoInferenceWrapper expects a local directory (uses cached_path
+        internally which doesn't support plain HF repo IDs). If hf_repo looks like
+        an HF repo ID (contains '/' but not an absolute path), snapshot_download()
+        is used so HF_ENDPOINT mirror and the local cache are both respected.
+        """
+        from pathlib import Path as _Path
+
+        p = _Path(self.hf_repo)
+        if p.is_absolute() or p.exists():
+            return str(p)
+        from huggingface_hub import snapshot_download
+
+        logger.info("Downloading MolmoBot snapshot from HF Hub: %s", self.hf_repo)
+        return snapshot_download(self.hf_repo)
+
     def _load_model(self) -> None:
         if self._wrapper is not None:
             return
@@ -90,10 +108,10 @@ class MolmoBotModelServer(ModelServer):
         from huggingface_hub import snapshot_download
         from olmo.models.molmobot.inference_wrapper import SynthManipMolmoInferenceWrapper
 
-        logger.info("Loading MolmoBot from %s (states_mode=%s)", self.hf_repo, self.states_mode)
-        local_dir = snapshot_download(self.hf_repo)
+        local_path = self._resolve_checkpoint()
+        logger.info("Loading MolmoBot from %s (states_mode=%s)", local_path, self.states_mode)
         self._wrapper = SynthManipMolmoInferenceWrapper(
-            checkpoint_path=local_dir,
+            checkpoint_path=local_path,
             states_mode=self.states_mode,
         )
         mc = self._wrapper.model_config

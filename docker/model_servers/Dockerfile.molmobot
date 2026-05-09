@@ -26,6 +26,9 @@ WORKDIR /workspace
 COPY pyproject.toml README.md ./
 COPY src/ src/
 COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_molmobot.sh docker/model_servers/entrypoint_molmobot.sh
+RUN chmod +x docker/model_servers/entrypoint_molmobot.sh
 
 # hatch-vcs reads the version from git tags; Docker builds have no .git.
 # Set a dummy version so hatchling skips the VCS lookup.
@@ -39,9 +42,9 @@ ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
 RUN uv run --python 3.11 src/vla_eval/model_servers/molmobot.py --help \
     && rm -rf ~/.cache/pip
 
-# Default args match configs/model_servers/molmobot/droid.yaml.
-# Override via `docker compose` `command:` or CLI flags.
-ENTRYPOINT ["uv", "run", "--python", "3.11", "src/vla_eval/model_servers/molmobot.py"]
+# The entrypoint checks / downloads required HF models (with retry), then
+# exec's the model server. Override only the server args via `command:`.
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_molmobot.sh"]
 CMD [ \
     "--hf_repo",           "allenai/MolmoBot-DROID", \
     "--execute_horizon",   "8", \

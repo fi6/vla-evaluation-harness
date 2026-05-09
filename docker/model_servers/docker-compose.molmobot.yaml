@@ -1,13 +1,14 @@
-# MolmoBot model server.
+# MolmoBot model server + LIBERO benchmark — combined stack.
 #
-# MolmoBot targets DROID / real-robot scenarios; run the benchmark separately
-# on the host or in its own container and point it at this server.
-#
-# Start the server:
+# Full eval (molmobot waits to load, then libero starts automatically):
 #   docker compose -f docker/model_servers/docker-compose.molmobot.yaml up
 #
-# Then run the benchmark on the host:
-#   vla-eval run --config configs/... --server-url ws://localhost:8000
+# Model server only (run the benchmark separately on the host):
+#   docker compose -f docker/model_servers/docker-compose.molmobot.yaml up molmobot-server
+#
+# NOTE: MolmoBot is natively designed for DROID (7-DOF joint-space control, 8D actions).
+# LIBERO expects 7D EEF-delta actions, so episodes will fail on action dimension mismatch.
+# This compose is useful for testing the connection layer (WebSocket handshake, HELLO, etc.)
 
 services:
   molmobot-server:
@@ -26,10 +27,11 @@ services:
       - cross_attn
       - --max_joint_delta
       - "0.2"
+      # LIBERO provides images under "agentview" and "wrist" keys (not DROID's exo_camera_1/wrist_camera)
       - --primary_image_key
-      - exo_camera_1
+      - agentview
       - --wrist_image_key
-      - wrist_camera
+      - wrist
       - --port
       - "8000"
     environment:
@@ -42,12 +44,38 @@ services:
       - ~/.cache/huggingface:/root/.cache/huggingface
       # Persist triton kernel cache across restarts (first inference compiles kernels).
       - ~/.triton:/root/.triton
+    # The HTTP /config endpoint becomes available once the model is fully loaded.
+    # libero waits for this before starting.
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
       interval: 10s
       timeout: 5s
       retries: 36
       start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      molmobot-server:
+        condition: service_healthy
+    # Entrypoint is already `conda run -n libero vla-eval`; override only the args.
+    # --server-url points to the molmobot-server service on the compose network.
+    # _inside_docker() is True here so vla-eval skips the Docker wrapper automatically.
+    command:
+      - run
+      - --config
+      - /workspace/configs/libero_10.yaml
+      - --server-url
+      - ws://molmobot-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
     deploy:
       resources:
         reservations:

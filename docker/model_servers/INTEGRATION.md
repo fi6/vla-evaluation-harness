@@ -158,15 +158,23 @@ services:
 
 ## 5. Inference latency logging
 
-`ModelServer.\_log_latency()` is defined in `src/vla_eval/model_servers/base.py`.
+`ModelServer._log_latency()` is defined in `src/vla_eval/model_servers/base.py`.
 Every model server should call it to produce `results/<model>_<ts>_latency.jsonl`.
 
-The timestamp in the filename is set on first write (start of the first episode), so it
+The timestamp in the filename is set on first write (start of the first successful episode), so it
 aligns within seconds of the benchmark result JSON timestamp — use it to correlate the two files.
 
-### For models using `predict()` (single-sample, e.g. pi0, molmoact)
+**Buffering behavior**: entries are held in memory per episode and only written to disk when
+`on_episode_end()` is called with a non-empty result (normal completion). Failed episodes
+(result `{}`) are still written but tagged `"success": false`, so failures are visible without
+polluting success statistics.
 
-Split the method at the model forward call:
+If your model server overrides `on_episode_end()`, it **must** call `await super().on_episode_end(result, ctx)`
+to trigger the flush.
+
+### For models using `predict()` (called every step, e.g. pi0, molmoact)
+
+Split the method at the model forward call and use the default `interval=10`:
 
 ```python
 def predict(self, obs: Observation, ctx: SessionContext) -> Action:
@@ -179,13 +187,15 @@ def predict(self, obs: Observation, ctx: SessionContext) -> Action:
     t_infer = time.perf_counter()
     result = self._model.forward(inputs)           # ← actual model call
     self._log_latency(ctx, preprocess_ms, (time.perf_counter() - t_infer) * 1000)
+    # interval=10 (default) — logs every 10th step
 
     return {"actions": result["actions"]}
 ```
 
-### For models using `predict_batch()` (batched, e.g. groot, starvla)
+### For models using `predict_batch()` (chunk-boundary only, e.g. groot, starvla)
 
-Same pattern, use `ctx_batch[0]` for the context:
+Use `interval=1` because `predict_batch()` is only called every `chunk_size` steps —
+using the default `interval=10` would only log at multiples of both chunk_size and 10:
 
 ```python
 def predict_batch(self, obs_batch, ctx_batch):
@@ -196,14 +206,14 @@ def predict_batch(self, obs_batch, ctx_batch):
 
     t_infer = time.perf_counter()
     result = self._model.forward(batch)
-    self._log_latency(ctx_batch[0], preprocess_ms, (time.perf_counter() - t_infer) * 1000)
+    self._log_latency(ctx_batch[0], preprocess_ms, (time.perf_counter() - t_infer) * 1000, interval=1)
     ...
 ```
 
 ### For models with custom `on_observation()` (e.g. molmobot)
 
 Time the inference call inside the method. If preprocess and infer are entangled
-(e.g. inside a helper), pass `preprocess_ms=0.0`:
+(e.g. inside a helper), pass `preprocess_ms=0.0`. Use `interval=1` for chunk-boundary refills:
 
 ```python
 async def on_observation(self, obs, ctx):
@@ -212,19 +222,22 @@ async def on_observation(self, obs, ctx):
         import time
         t_infer = time.perf_counter()
         self._refill_buffer(obs, state)
-        self._log_latency(ctx, 0.0, (time.perf_counter() - t_infer) * 1000)
+        self._log_latency(ctx, 0.0, (time.perf_counter() - t_infer) * 1000, interval=1)
 ```
 
 ### Output format
 
 ```jsonl
-{"episode_id": "<uuid>", "step": 0,  "preprocess_ms": 0.911, "infer_ms": 8914.574}
-{"episode_id": "<uuid>", "step": 10, "preprocess_ms": 0.825, "infer_ms": 78.803}
+{"episode_id": "<uuid>", "step": 0,  "preprocess_ms": 0.911, "infer_ms": 8914.574, "success": true}
+{"episode_id": "<uuid>", "step": 10, "preprocess_ms": 0.825, "infer_ms": 78.803,   "success": true}
+{"episode_id": "<uuid>", "step": 0,  "preprocess_ms": 0.910, "infer_ms": 7821.100, "success": false}
 ```
 
-- Logged every 10 steps (configurable via `interval` param).
+- `success: true` — episode completed normally; `false` — episode ended with an exception.
 - `episode_id` = `ctx.episode_id` — matches episode UUIDs in the benchmark result JSON.
 - Step 0 `infer_ms` is typically high (JIT / triton kernel compile on first inference).
+- `predict()` models: logged every 10 steps (`interval=10`).
+- `predict_batch()` / refill models: logged every chunk boundary (`interval=1`).
 
 ---
 

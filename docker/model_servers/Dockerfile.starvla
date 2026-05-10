@@ -1,0 +1,59 @@
+# starVLA model server image (Qwen2.5-VL/Qwen3-VL + GR00T/OFT/PI/FAST action head).
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.starvla \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-starvla:local \
+#     .
+#
+# The kernels package provides pre-compiled flash-attn2 wheels, so the
+# cudnn8-runtime image is sufficient (nvcc not required).
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+# Copy harness source. starvla.py's PEP 723 inline metadata references vla-eval
+# as an editable install at path "../../.." relative to the script, which
+# resolves to /workspace — so the source must be present before `uv run`.
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_starvla.sh docker/model_servers/entrypoint_starvla.sh
+RUN chmod +x docker/model_servers/entrypoint_starvla.sh
+
+# hatch-vcs reads the version from git tags; Docker builds have no .git.
+# Set a dummy version so hatchling skips the VCS lookup.
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+# Pre-install all dependencies declared in starvla.py's inline metadata
+# (starvla from GitHub, torch, transformers, kernels, qwen-vl-utils, vla-eval editable, …).
+# Running --help triggers uv to resolve and cache the isolated environment
+# without loading the model or touching the GPU.
+RUN uv run --python 3.11 src/vla_eval/model_servers/starvla.py --help \
+    && rm -rf ~/.cache/pip
+
+# The entrypoint checks / downloads required HF models (with retry), then
+# exec's the model server. Override only the server args via `command:`.
+# Default args match configs/model_servers/starvla/libero_qwen25_groot.yaml.
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_starvla.sh"]
+CMD [ \
+    "--checkpoint",         "StarVLA/Qwen2.5-VL-GR00T-LIBERO-4in1", \
+    "--unnorm_type",        "minmax", \
+    "--observation_params", "{\"send_wrist_image\": true}", \
+    "--use_bf16", \
+    "--chunk_size",         "1", \
+    "--port",               "8000" \
+]

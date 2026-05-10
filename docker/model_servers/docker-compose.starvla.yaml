@@ -1,0 +1,82 @@
+name: vla-eval-starvla
+# starVLA model server + LIBERO benchmark — combined stack.
+#
+# Full eval (starvla waits to load, then libero starts automatically):
+#   docker compose -f docker/model_servers/docker-compose.starvla.yaml up
+#
+# Model server only (run the benchmark separately on the host):
+#   docker compose -f docker/model_servers/docker-compose.starvla.yaml up starvla-server
+#
+# Switch checkpoint via `command:` override, e.g. for Qwen3-VL-OFT:
+#   docker compose ... run starvla-server \
+#     --checkpoint StarVLA/Qwen3-VL-OFT-LIBERO-4in1 --unnorm_type minmax \
+#     --observation_params '{"send_wrist_image": true}' --use_bf16 --port 8000
+
+services:
+  starvla-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-starvla:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.starvla
+    ports:
+      - "8000:8000"
+    command:
+      - --checkpoint
+      - StarVLA/Qwen2.5-VL-GR00T-LIBERO-4in1
+      - --unnorm_type
+      - minmax
+      - --observation_params
+      - '{"send_wrist_image": true}'
+      - --use_bf16
+      - --chunk_size
+      - "1"
+      - --port
+      - "8000"
+    environment:
+      # Optional HuggingFace mirror, e.g. https://hf-mirror.com
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+    volumes:
+      # Mount only the HF model cache, not the entire ~/.cache.
+      # Mounting ~/.cache would shadow the uv environment baked into the image,
+      # forcing a re-install from PyPI on every start.
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      # Persist triton kernel cache across restarts (first inference compiles kernels).
+      - ~/.triton:/root/.triton
+    # The HTTP /config endpoint becomes available once the model is fully loaded.
+    # libero waits for this before starting.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      starvla-server:
+        condition: service_healthy
+    # Entrypoint is already `conda run -n libero vla-eval`; override only the args.
+    # --server-url points to the starvla-server service on the compose network.
+    # _inside_docker() is True here so vla-eval skips the Docker wrapper automatically.
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/quick.yaml
+      - --server-url
+      - ws://starvla-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]

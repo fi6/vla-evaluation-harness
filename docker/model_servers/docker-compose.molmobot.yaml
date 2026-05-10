@@ -1,3 +1,4 @@
+name: vla-eval-molmobot
 # MolmoBot model server + LIBERO benchmark — combined stack.
 #
 # Full eval (molmobot waits to load, then libero starts automatically):
@@ -70,7 +71,7 @@ services:
     command:
       - run
       - --config
-      - /workspace/configs/libero_10.yaml
+      - /workspace/configs/benchmarks/libero/quick.yaml
       - --server-url
       - ws://molmobot-server:8000
       - -y

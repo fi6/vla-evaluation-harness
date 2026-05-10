@@ -37,6 +37,8 @@ services:
       - --verbose
     volumes:
       - ~/.cache/huggingface:/root/.cache/huggingface
+      # Persist openpi GCS checkpoint cache across restarts (pi05_libero is ~4 GB).
+      - ~/.cache/openpi:/root/.cache/openpi
       - ../../results:/workspace/results
     # The HTTP /config endpoint becomes available once the model is fully loaded.
     # libero waits for this before starting.
@@ -64,7 +66,7 @@ services:
     command:
       - run
       - --config
-      - /workspace/configs/libero_10.yaml
+      - /workspace/configs/benchmarks/libero/quick.yaml
       - --server-url
       - ws://pi0-server:8000
       - -y

@@ -26,6 +26,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import time
+
 import numpy as np
 
 from vla_eval.specs import IMAGE_RGB, LANGUAGE, RAW, DimSpec
@@ -114,6 +116,7 @@ class Pi0ModelServer(PredictModelServer):
         self._load_model()
         assert self._policy is not None
 
+        t_pre = time.perf_counter()
         openpi_obs: dict[str, Any] = {}
 
         images_dict = obs.get("images", {})
@@ -137,7 +140,10 @@ class Pi0ModelServer(PredictModelServer):
             else:
                 openpi_obs[self.state_key] = np.zeros(self.state_dim, dtype=np.float64)
 
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
+        t_infer = time.perf_counter()
         result = self._policy.infer(openpi_obs)
+        self._log_latency(ctx, preprocess_ms, (time.perf_counter() - t_infer) * 1000)
         return {"actions": result["actions"]}
 
 

@@ -45,6 +45,7 @@ services:
       - ~/.cache/huggingface:/root/.cache/huggingface
       # Persist triton kernel cache across restarts (first inference compiles kernels).
       - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
     # The HTTP /config endpoint becomes available once the model is fully loaded.
     # libero waits for this before starting.
     healthcheck:

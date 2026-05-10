@@ -183,7 +183,11 @@ class MolmoBotModelServer(ModelServer):
 
         # Refill action buffer if exhausted.
         if state["buffer_index"] >= self.execute_horizon or not state["action_buffer"]:
+            import time
+
+            t_infer = time.perf_counter()
             self._refill_buffer(obs, state)
+            self._log_latency(ctx, 0.0, (time.perf_counter() - t_infer) * 1000, interval=1)
 
         # Consume next action from buffer.
         action_dict = state["action_buffer"][state["buffer_index"]]

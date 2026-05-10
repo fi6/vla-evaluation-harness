@@ -8,6 +8,6 @@
 set -euo pipefail
 
 uv run --python 3.11 /workspace/docker/model_servers/preflight.py \
-    nvidia/GR00T-N1.6-3B
+    0xAnkitSingh/GR00T-N1.6-LIBERO
 
 exec uv run --python 3.11 /workspace/src/vla_eval/model_servers/groot.py "$@"

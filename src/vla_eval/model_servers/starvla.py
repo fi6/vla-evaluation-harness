@@ -429,8 +429,11 @@ class StarVLAModelServer(PredictModelServer):
         return np.where(mask, 0.5 * (normalized + 1) * (high - low) + low, normalized)
 
     def predict_batch(self, obs_batch: list[Observation], ctx_batch: list[SessionContext]) -> list[Action]:
+        import time
+
         self._load_model()
         assert self._model is not None
+        t_pre = time.perf_counter()
 
         def _prepare_img(img: Any) -> PILImage.Image:
             if isinstance(img, np.ndarray):
@@ -461,7 +464,10 @@ class StarVLAModelServer(PredictModelServer):
 
             examples.append(example)
 
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
+        t_infer = time.perf_counter()
         result = self._model.predict_action(examples)
+        self._log_latency(ctx_batch[0], preprocess_ms, (time.perf_counter() - t_infer) * 1000, interval=1)
         actions_batch = result["normalized_actions"]  # [B, T, action_dim]
 
         outputs = []

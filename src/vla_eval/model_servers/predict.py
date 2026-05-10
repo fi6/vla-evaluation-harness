@@ -520,6 +520,8 @@ class PredictModelServer(ModelServer):
         if self.continuous_inference:
             await self._stop_ci(sid)
 
+        await super().on_episode_end(result, ctx)
+
     async def _stop_ci(self, session_id: str) -> None:
         """Cancel and await the CI loop for a session."""
         task = self._ci_tasks.pop(session_id, None)

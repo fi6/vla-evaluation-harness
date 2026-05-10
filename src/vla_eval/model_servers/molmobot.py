@@ -139,6 +139,7 @@ class MolmoBotModelServer(ModelServer):
 
     async def on_episode_end(self, result: dict[str, Any], ctx: SessionContext) -> None:
         self._sessions.pop(ctx.session_id, None)
+        await super().on_episode_end(result, ctx)
 
     # -- specs ------------------------------------------------------------
 

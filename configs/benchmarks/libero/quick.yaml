@@ -1,0 +1,18 @@
+# LIBERO-10 quick eval — 5 tasks × 5 episodes (25 episodes total)
+server:
+  url: "ws://localhost:8000"
+
+docker:
+  image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
+
+output_dir: "./results"
+
+benchmarks:
+  - benchmark: "vla_eval.benchmarks.libero.benchmark:LIBEROBenchmark"
+    subname: libero_10_quick
+    episodes_per_task: 5
+    max_tasks: 5
+    params:
+      suite: libero_10
+      seed: 7
+      num_steps_wait: 10

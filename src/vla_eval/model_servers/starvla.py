@@ -7,7 +7,7 @@
 #     "torchvision>=0.17",
 #     "transformers>=4.40,<5",
 #     "pillow>=9.0",
-#     "opencv-python>=4.0",
+#     "opencv-python-headless>=4.0",
 #     "numpy>=1.24",
 #     "accelerate",
 #     "kernels>=0.11.0",

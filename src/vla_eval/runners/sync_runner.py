@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import itertools
+import logging
 from typing import Any
 
 from vla_eval.benchmarks.base import Benchmark
 from vla_eval.runners.base import EpisodeRunner
 from vla_eval.types import EpisodeResult, Task
+
+logger = logging.getLogger(__name__)
 
 
 class SyncEpisodeRunner(EpisodeRunner):
@@ -34,6 +37,9 @@ class SyncEpisodeRunner(EpisodeRunner):
         max_steps: int | None = None,
     ) -> EpisodeResult:
         """Run a synchronous episode."""
+        task_name = task.get("name", "?")
+        logger.info("episode start  task=%r", task_name)
+
         await benchmark.start_episode(task)
         obs_dict = await benchmark.get_observation()
 
@@ -52,6 +58,15 @@ class SyncEpisodeRunner(EpisodeRunner):
         elapsed = await benchmark.get_time()
         metrics = await benchmark.get_result()
         episode_result: dict = {"metrics": metrics, "steps": step + 1, "elapsed_sec": round(elapsed, 3)}
+
+        success = metrics.get("success", "?")
+        logger.info(
+            "episode done   task=%r  success=%s  steps=%d  elapsed=%.1fs",
+            task_name,
+            success,
+            step + 1,
+            elapsed,
+        )
 
         await conn.end_episode(episode_result)
         return episode_result

@@ -46,11 +46,9 @@ RUN uv run --python 3.11 src/vla_eval/model_servers/molmobot.py --help \
 # exec's the model server. Override only the server args via `command:`.
 ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_molmobot.sh"]
 CMD [ \
-    "--hf_repo",           "allenai/MolmoBot-DROID", \
-    "--execute_horizon",   "8", \
-    "--states_mode",       "cross_attn", \
-    "--max_joint_delta",   "0.2", \
-    "--primary_image_key", "exo_camera_1", \
-    "--wrist_image_key",   "wrist_camera", \
-    "--port",              "8000" \
+    "--hf_repo",         "allenai/MolmoBot-DROID", \
+    "--execute_horizon", "8", \
+    "--states_mode",     "cross_attn", \
+    "--max_joint_delta", "0.2", \
+    "--port",            "8000" \
 ]

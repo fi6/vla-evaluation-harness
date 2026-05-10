@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import os
+import time
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Coroutine, Dict, Literal
+from typing import IO, Any, Callable, Coroutine, Dict, Literal
 
 from vla_eval.specs import DimSpec
 from vla_eval.types import Action, Observation
+
+logger = logging.getLogger(__name__)
 
 # Type alias for the async send_action callback injected by the framework.
 # NOTE: Dict (not dict) for Python 3.8 compatibility in type aliases.
@@ -79,9 +85,6 @@ class ModelServer(ABC):
     async def on_episode_start(self, config: dict[str, Any], ctx: SessionContext) -> None:
         """Called at episode start. Override to reset model state."""
 
-    async def on_episode_end(self, result: dict[str, Any], ctx: SessionContext) -> None:
-        """Called at episode end. Optional."""
-
     def get_action_spec(self) -> dict[str, DimSpec]:
         """Declare the action output format of this model server.
 
@@ -116,3 +119,58 @@ class ModelServer(ABC):
         an explicit ``observation_params`` dict to ``PredictModelServer``.
         """
         return {}
+
+    def _log_latency(
+        self,
+        ctx: SessionContext,
+        preprocess_ms: float,
+        infer_ms: float,
+        interval: int = 10,
+    ) -> None:
+        """Buffer per-step timing; flushed to disk only on successful episode end.
+
+        Entries are held in memory per episode_id and written to
+        results/<model>_<ts>_latency.jsonl only when on_episode_end() receives
+        a non-empty result dict (normal completion). Episodes that end with an
+        exception send an empty result dict, and their buffered entries are
+        silently discarded so failures don't pollute the latency log.
+
+        Only samples every ``interval`` steps to keep file size manageable.
+        """
+        if ctx.step % interval != 0:
+            return
+        if not hasattr(self, "_latency_buf"):
+            self._latency_buf: dict[str, list[dict[str, Any]]] = {}
+        latency_buf = self._latency_buf
+        latency_buf.setdefault(ctx.episode_id, []).append(
+            {
+                "episode_id": ctx.episode_id,
+                "step": ctx.step,
+                "preprocess_ms": round(preprocess_ms, 3),
+                "infer_ms": round(infer_ms, 3),
+            }
+        )
+
+    def _flush_latency(self, ctx: SessionContext, success: bool) -> None:
+        """Flush or discard buffered latency entries for the given episode."""
+        latency_buf: dict[str, list[dict[str, Any]]] = getattr(self, "_latency_buf", {})  # empty if never called
+        entries = latency_buf.pop(ctx.episode_id, [])
+        if not entries:
+            return
+        latency_file: IO[str] | None = getattr(self, "_latency_file", None)
+        if latency_file is None:
+            name = type(self).__name__.replace("ModelServer", "").lower()
+            ts = int(time.time())
+            os.makedirs("results", exist_ok=True)
+            path = os.path.join("results", f"{name}_{ts}_latency.jsonl")
+            latency_file = open(path, "a")  # noqa: SIM115
+            self._latency_file: IO[str] = latency_file
+            logger.info("Latency log: %s", path)
+        for entry in entries:
+            json.dump({**entry, "success": success}, latency_file)
+            latency_file.write("\n")
+        latency_file.flush()
+
+    async def on_episode_end(self, result: dict[str, Any], ctx: SessionContext) -> None:
+        """Called at episode end. Flushes latency buffer on success, discards on failure."""
+        self._flush_latency(ctx, success=bool(result))

@@ -32,7 +32,6 @@ services:
       - "10"
       - --port
       - "8000"
-      - --verbose
     environment:
       # Prevent JAX from pre-allocating the entire GPU memory pool at import time.
       XLA_PYTHON_CLIENT_PREALLOCATE: "false"

@@ -126,11 +126,14 @@ class MolmoActModelServer(PredictModelServer):
     # -- inference --------------------------------------------------------
 
     def predict(self, obs: Observation, ctx: SessionContext) -> Action:
+        import time
+
         import torch
 
         self._load_model()
         assert self._model is not None and self._processor is not None
 
+        t_pre = time.perf_counter()
         # Build PIL image list from all cameras in observation-dict insertion order.
         images_dict = obs.get("images", {})
         imgs = [PILImage.fromarray(np.asarray(arr, dtype=np.uint8)).convert("RGB") for arr in images_dict.values()]
@@ -159,12 +162,15 @@ class MolmoActModelServer(PredictModelServer):
             _device = _torch.device("cpu")
         inputs = {k: v.to(_device) for k, v in inputs.items()}
 
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
+        t_infer = time.perf_counter()
         with torch.inference_mode():
             if _device.type == "cuda":
                 with torch.autocast("cuda", enabled=True, dtype=torch.bfloat16):
                     generated_ids = self._model.generate(**inputs, max_new_tokens=512)
             else:
                 generated_ids = self._model.generate(**inputs, max_new_tokens=512)
+        self._log_latency(ctx, preprocess_ms, (time.perf_counter() - t_infer) * 1000)
 
         # Strip the prompt prefix; decode only the newly generated tokens.
         generated_tokens = generated_ids[:, inputs["input_ids"].size(1) :]

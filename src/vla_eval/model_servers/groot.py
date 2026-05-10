@@ -194,9 +194,12 @@ class GR00TModelServer(PredictModelServer):
     _BRIDGE_DEFAULT_ROT = np.array([[0, 0, 1.0], [0, 1.0, 0], [-1.0, 0, 0]])
 
     def predict_batch(self, obs_batch: list[Observation], ctx_batch: list[SessionContext]) -> list[Action]:
+        import time
+
         self._load_model()
         assert self._policy is not None and self._modality_config is not None
         B = len(obs_batch)
+        t_pre = time.perf_counter()
 
         if self.image_resolution:
             import cv2
@@ -270,7 +273,10 @@ class GR00TModelServer(PredictModelServer):
                     observation["state"][sk][obs_idx, 0, :] = state_arr[offset : offset + dim]
                 offset += dim
 
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
+        t_infer = time.perf_counter()
         action_dict, _ = self._policy.get_action(observation)
+        self._log_latency(ctx_batch[0], preprocess_ms, (time.perf_counter() - t_infer) * 1000, interval=1)
 
         keys = self.action_keys or self._modality_config["action"].modality_keys
         outputs = []

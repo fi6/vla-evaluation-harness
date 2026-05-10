@@ -51,8 +51,9 @@ RUN uv run --python 3.11 src/vla_eval/model_servers/groot.py --help \
 # Default args match configs/model_servers/groot/groot.yaml.
 ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_groot.sh"]
 CMD [ \
-    "--model_path",     "nvidia/GR00T-N1.6-3B", \
-    "--embodiment_tag", "GR1", \
+    "--model_path",     "0xAnkitSingh/GR00T-N1.6-LIBERO", \
+    "--embodiment_tag", "LIBERO_PANDA", \
+    "--invert_gripper", \
     "--chunk_size",     "16", \
     "--port",           "8000" \
 ]

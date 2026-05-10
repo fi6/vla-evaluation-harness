@@ -1,3 +1,4 @@
+name: vla-eval-groot
 # GR00T model server + LIBERO benchmark — combined stack.
 #
 # Full eval (groot waits to load, then libero starts automatically):
@@ -14,10 +15,25 @@ services:
       dockerfile: docker/model_servers/Dockerfile.groot
     ports:
       - "8000:8000"
+    command:
+      - --model_path
+      - nvidia/GR00T-N1.6-3B
+      - --embodiment_tag
+      - GR1
+      - --chunk_size
+      - "16"
+      - --port
+      - "8000"
     environment:
+      # Optional HuggingFace mirror, e.g. https://hf-mirror.com
       HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
     volumes:
+      # Mount only the HF model cache, not the entire ~/.cache.
+      # Mounting ~/.cache would shadow the uv environment baked into the image,
+      # forcing a re-install from PyPI on every start.
       - ~/.cache/huggingface:/root/.cache/huggingface
+      # Persist triton kernel cache across restarts (first inference compiles kernels).
+      - ~/.triton:/root/.triton
     # The HTTP /config endpoint becomes available once the model is fully loaded.
     # libero waits for this before starting.
     healthcheck:
@@ -44,7 +60,7 @@ services:
     command:
       - run
       - --config
-      - /workspace/configs/libero_10.yaml
+      - /workspace/configs/benchmarks/libero/quick.yaml
       - --server-url
       - ws://groot-server:8000
       - -y

@@ -150,6 +150,8 @@ class OFTModelServer(PredictModelServer):
         return spec
 
     def predict(self, obs: Observation, ctx: SessionContext) -> Action:
+        import time
+
         from experiments.robot.openvla_utils import get_vla_action
         from prismatic.vla.constants import PROPRIO_DIM
 
@@ -176,6 +178,7 @@ class OFTModelServer(PredictModelServer):
             oft_obs["state"] = np.zeros(PROPRIO_DIM, dtype=np.float64)
 
         task_desc = obs.get("task_description", "")
+        t0 = time.perf_counter()
         actions = get_vla_action(
             self._cfg,
             self._vla,
@@ -185,6 +188,10 @@ class OFTModelServer(PredictModelServer):
             self._action_head,
             self._proprio_projector,
         )
+        latency_ms = (time.perf_counter() - t0) * 1000
+        logger.info("inference latency: %.1f ms", latency_ms)
+        print(f"inference latency: {latency_ms:.1f} ms", flush=True)
+
         # Gripper: RLDS [0=close,1=open] → robosuite [-1=open,+1=close]
         actions_arr = np.asarray(actions, dtype=np.float32)
         actions_arr[..., -1] = -np.sign(2 * actions_arr[..., -1] - 1)

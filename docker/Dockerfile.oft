@@ -1,0 +1,100 @@
+# OpenVLA-OFT model server image
+#
+# Build from repo root:
+#   docker build -t vla-eval/oft:latest -f docker/Dockerfile.oft .
+#
+# Run (Terminal 1 replacement for `vla-eval serve`):
+#   docker run --rm --gpus all -p 8000:8000 --name oft-server \
+#       -e HF_ENDPOINT=https://hf-mirror.com \
+#       -v ~/.cache/huggingface:/root/.cache/huggingface \
+#       vla-eval/oft:latest
+#
+# Override CMD to serve a different OFT checkpoint, e.g.:
+#   docker run --rm --gpus all -p 8000:8000 \
+#       -e HF_ENDPOINT=https://hf-mirror.com \
+#       -v ~/.cache/huggingface:/root/.cache/huggingface \
+#       vla-eval/oft:latest \
+#       --pretrained_checkpoint moojink/openvla-7b-oft-finetuned-libero-goal \
+#       --unnorm_key libero_goal_no_noops \
+#       --num_images_in_input 2 --chunk_size 8 \
+#       --host 0.0.0.0 --port 8000
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1
+
+# Python 3.11 from deadsnakes PPA (Ubuntu 22.04 ships 3.11.0rc1 which
+# segfaults hatchling during the editable install of vla-eval).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common git ca-certificates curl \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3.11-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3
+
+# uv — same source as the rest of the harness images
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Single install: model-server deps (from oft.py uv-script header) plus
+# vla_eval's runtime deps (from pyproject.toml). cu124 wheels match
+# driver 550.x / CUDA 12.4 on the host.
+RUN uv pip install --system --no-cache --python /usr/bin/python3.11 \
+        --extra-index-url https://download.pytorch.org/whl/cu124 \
+        --index-strategy unsafe-best-match \
+        "torch==2.4.1" \
+        "torchvision==0.19.1" \
+        "transformers>=4.40,<5" \
+        timm \
+        "pillow>=9.4.0" \
+        "numpy>=1.24,<2" \
+        accelerate \
+        # vla_eval runtime deps
+        "anyio>=4.0.0" \
+        "filelock>=3.0" \
+        "imageio[ffmpeg]" \
+        "lazyregistry>=0.4.0" \
+        "msgpack>=1.0.0" \
+        omegaconf \
+        "pyyaml>=6.0" \
+        "rich>=13.0" \
+        tqdm \
+        "websockets>=12.0"
+
+# openvla-oft repo — pinned to the same revision as oft.py uv-script header.
+# The repo is layered: `prismatic` ships as a normal package, but `experiments`
+# is a top-level dir that pip won't install. We clone the repo into /app and
+# add it to PYTHONPATH so `import experiments.robot.openvla_utils` resolves.
+ARG OFT_REV=e4287e94541f459edc4feabc4e181f537cd569a8
+RUN git clone https://github.com/moojink/openvla-oft.git /app/openvla-oft \
+    && cd /app/openvla-oft && git checkout ${OFT_REV} \
+    && uv pip install --system --no-cache --python /usr/bin/python3.11 -e . \
+    && rm -rf /app/openvla-oft/.git
+
+# tensorflow_graphics has a Python 3.11 import bug (TypeError in inspect.stack
+# inside its export_api). It is pulled in transitively by prismatic's RLDS
+# dataset code, which is training-only — inference never calls any tfg
+# function. Replace the package with empty stubs so the eager import chain
+# at `import prismatic` succeeds.
+RUN uv pip uninstall --system --python /usr/bin/python3.11 tensorflow-graphics 2>/dev/null || true \
+    && SITE=$(/usr/bin/python3.11 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])") \
+    && mkdir -p "$SITE/tensorflow_graphics/geometry/transformation" \
+    && : > "$SITE/tensorflow_graphics/__init__.py" \
+    && : > "$SITE/tensorflow_graphics/geometry/__init__.py" \
+    && : > "$SITE/tensorflow_graphics/geometry/transformation/__init__.py"
+
+WORKDIR /workspace
+COPY src/ src/
+
+ENV PYTHONPATH=/workspace/src:/app/openvla-oft
+EXPOSE 8000
+
+ENTRYPOINT ["python", "src/vla_eval/model_servers/oft.py"]
+CMD ["--pretrained_checkpoint", "moojink/openvla-7b-oft-finetuned-libero-spatial", \
+     "--unnorm_key", "libero_spatial_no_noops", \
+     "--num_images_in_input", "2", \
+     "--chunk_size", "8", \
+     "--host", "0.0.0.0", \
+     "--port", "8000"]

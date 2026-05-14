@@ -1,0 +1,79 @@
+# OpenVLA model server image
+#
+# Build from repo root:
+#   docker build -t vla-eval/openvla:latest -f docker/Dockerfile.openvla .
+#
+# Run (Terminal 1 replacement for `vla-eval serve`):
+#   docker run --rm --gpus all -p 8000:8000 --name openvla-server \
+#       -v ~/.cache/huggingface:/root/.cache/huggingface \
+#       vla-eval/openvla:latest
+#
+# Override CMD to serve a different checkpoint, e.g.:
+#   docker run --rm --gpus all -p 8000:8000 \
+#       -v ~/.cache/huggingface:/root/.cache/huggingface \
+#       vla-eval/openvla:latest \
+#       --model_path openvla/openvla-7b-finetuned-libero-goal \
+#       --unnorm_key libero_goal --chunk_size 1 \
+#       --host 0.0.0.0 --port 8000 \
+#       --jpeg_roundtrip --center_crop
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    PYTHONUNBUFFERED=1
+
+# Python 3.11 from deadsnakes PPA (Ubuntu 22.04 ships 3.11.0rc1 which
+# segfaults hatchling during the editable install of vla-eval).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        software-properties-common git ca-certificates curl \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3.11-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python \
+    && ln -sf /usr/bin/python3.11 /usr/local/bin/python3
+
+# uv — same source as the rest of the harness images
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Single install: model-server deps (from openvla.py uv-script header)
+# plus vla_eval's runtime deps (from pyproject.toml). No editable install —
+# we put src/ on PYTHONPATH instead, avoiding the hatchling build step
+# entirely (which has been segfaulting during PEP 517 metadata prep).
+RUN uv pip install --system --no-cache --python /usr/bin/python3.11 \
+        --extra-index-url https://download.pytorch.org/whl/cu124 \
+        --index-strategy unsafe-best-match \
+        "torch==2.4.1" \
+        "torchvision==0.19.1" \
+        transformers==4.40.1 \
+        timm==0.9.10 \
+        tokenizers==0.19.1 \
+        "pillow>=9.4.0" \
+        "numpy>=1.24,<2" \
+        accelerate \
+        # vla_eval runtime deps
+        "anyio>=4.0.0" \
+        "filelock>=3.0" \
+        "imageio[ffmpeg]" \
+        "lazyregistry>=0.4.0" \
+        "msgpack>=1.0.0" \
+        omegaconf \
+        "pyyaml>=6.0" \
+        "rich>=13.0" \
+        tqdm \
+        "websockets>=12.0"
+
+WORKDIR /workspace
+COPY src/ src/
+
+ENV PYTHONPATH=/workspace/src
+EXPOSE 8000
+
+ENTRYPOINT ["python", "src/vla_eval/model_servers/openvla.py"]
+CMD ["--model_path", "openvla/openvla-7b-finetuned-libero-spatial", \
+     "--unnorm_key", "libero_spatial", \
+     "--chunk_size", "1", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--jpeg_roundtrip", \
+     "--center_crop"]

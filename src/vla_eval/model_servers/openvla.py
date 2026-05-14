@@ -122,6 +122,7 @@ class OpenVLAModelServer(PredictModelServer):
         return pil
 
     def predict(self, obs: Observation, ctx: SessionContext) -> Action:
+        import time
         import torch
 
         self._load_model()
@@ -138,7 +139,10 @@ class OpenVLAModelServer(PredictModelServer):
         if self.unnorm_key:
             kwargs["unnorm_key"] = self.unnorm_key
 
+        t0 = time.perf_counter()
         action = self._model.predict_action(**inputs, **kwargs)
+        logger.info("inference latency: %.1f ms", (time.perf_counter() - t0) * 1000)
+
         # Gripper: RLDS [0=close,1=open] → robosuite [-1=open,+1=close]
         action_arr = np.asarray(action, dtype=np.float32)
         action_arr[..., -1] = -np.sign(2 * action_arr[..., -1] - 1)

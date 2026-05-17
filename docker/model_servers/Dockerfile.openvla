@@ -1,0 +1,54 @@
+# OpenVLA model server image (HuggingFace AutoModelForVision2Seq).
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.openvla \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-openvla:local \
+#     .
+#
+# OpenVLA does not require flash-attn compilation, so the smaller CUDA
+# *runtime* base is sufficient.
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+# Copy harness source. openvla.py's PEP 723 inline metadata references
+# vla-eval as an editable install at "../../.." which resolves to /workspace.
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_openvla.sh docker/model_servers/entrypoint_openvla.sh
+RUN chmod +x docker/model_servers/entrypoint_openvla.sh
+
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+# Pre-install all deps declared in openvla.py's inline metadata.
+# Running --help triggers uv to resolve and cache the isolated environment
+# without loading the model or touching the GPU.
+RUN uv run --python 3.11 src/vla_eval/model_servers/openvla.py --help \
+    && rm -rf ~/.cache/pip
+
+# The entrypoint preflights HF weights (with retry), then exec's the server.
+# Default args match configs/model_servers/openvla/libero_spatial.yaml.
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_openvla.sh"]
+CMD [ \
+    "--model_path",   "openvla/openvla-7b-finetuned-libero-spatial", \
+    "--unnorm_key",   "libero_spatial", \
+    "--chunk_size",   "1", \
+    "--jpeg_roundtrip", \
+    "--center_crop", \
+    "--port",         "8000" \
+]

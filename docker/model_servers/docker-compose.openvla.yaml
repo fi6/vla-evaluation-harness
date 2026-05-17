@@ -1,0 +1,89 @@
+name: vla-eval-openvla
+# OpenVLA model server + LIBERO benchmark — combined stack.
+#
+# Full eval (openvla waits to load, then libero starts automatically):
+#   docker compose -f docker/model_servers/docker-compose.openvla.yaml up
+#
+# Model server only (run the benchmark separately on the host):
+#   docker compose -f docker/model_servers/docker-compose.openvla.yaml up openvla-server
+
+services:
+  openvla-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-openvla:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.openvla
+    ports:
+      - "8000:8000"
+    command:
+      - --model_path
+      - openvla/openvla-7b-finetuned-libero-spatial
+      - --unnorm_key
+      - libero_spatial
+      - --chunk_size
+      - "1"
+      - --jpeg_roundtrip
+      - --center_crop
+      - --port
+      - "8000"
+    environment:
+      # Optional HuggingFace mirror, e.g. https://hf-mirror.com
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+    volumes:
+      # Use absolute paths — `~` expands to the snap-confined path
+      # (~/snap/docker/...) under snap-installed Docker, which has an
+      # empty HF/triton cache. Mounting only the HF model cache (not
+      # the entire ~/.cache) avoids shadowing the uv environment baked
+      # into the image.
+      - /home/user/.cache/huggingface:/root/.cache/huggingface
+      # Persist triton kernel cache across restarts (first inference compiles kernels).
+      - /home/user/.triton:/root/.triton
+      - ../../results:/workspace/results
+    # The HTTP /config endpoint becomes available once the model is fully loaded.
+    # libero waits for this before starting.
+    # Cold-start budget here is generous: on slow networks `uv run` does a
+    # full git+wheel resolution (dlimp, transformers fork, etc.) before the
+    # model can even start loading. Empirically this can take 30+ minutes the
+    # first time. Once the HF cache and uv archive cache are warm, restarts
+    # finish in under a minute.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 240
+      start_period: 600s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      openvla-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/spatial_quick.yaml
+      - --server-url
+      - ws://openvla-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      # Bind-mount configs so newly added benchmark YAMLs (e.g. spatial_quick)
+      # don't require rebuilding the libero image to be picked up.
+      - ../../configs:/workspace/configs:ro
+    # robosuite/MuJoCo renders via EGL, which needs the NVIDIA GPU's graphics
+    # capability — not just `gpu` (which compose maps to compute+utility only).
+    # Without `graphics` MuJoCo segfaults during env reset.
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

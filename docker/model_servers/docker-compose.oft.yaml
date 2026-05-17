@@ -1,0 +1,88 @@
+name: vla-eval-oft
+# OpenVLA-OFT model server + LIBERO benchmark — combined stack.
+#
+# Full eval (oft waits to load, then libero starts automatically):
+#   docker compose -f docker/model_servers/docker-compose.oft.yaml up
+#
+# Model server only (run the benchmark separately on the host):
+#   docker compose -f docker/model_servers/docker-compose.oft.yaml up oft-server
+
+services:
+  oft-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-oft:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.oft
+    ports:
+      - "8000:8000"
+    command:
+      # Pass the local HF snapshot directory rather than the repo id —
+      # openvla-oft's `find_checkpoint_file` requires a real directory
+      # so it can read the action_head/proprio_projector .pt sidecars.
+      - --pretrained_checkpoint
+      - /root/.cache/huggingface/hub/models--moojink--openvla-7b-oft-finetuned-libero-spatial/snapshots/6d0231af0e48c5985f1ff86908f4674b84bc049b
+      - --unnorm_key
+      - libero_spatial_no_noops
+      - --num_images_in_input
+      - "2"
+      - --chunk_size
+      - "8"
+      - --port
+      - "8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      # Skip network revalidation — host HF cache is fully populated for
+      # both `moojink/openvla-7b-oft-finetuned-libero-spatial` and the
+      # `openvla/openvla-7b-finetuned-libero-spatial` base. Without this,
+      # preflight tries to revalidate every blob against hf-mirror.com,
+      # which can take hours on a slow link even with all files present.
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      # Use absolute paths — `~` expands to the snap-confined path
+      # (~/snap/docker/...) under snap-installed Docker, where the HF
+      # cache and triton kernel cache are not actually populated.
+      - /home/user/.cache/huggingface:/root/.cache/huggingface
+      - /home/user/.triton:/root/.triton
+      - ../../results:/workspace/results
+    # Cold-start budget — see Dockerfile.openvla for rationale.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 240
+      start_period: 600s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      oft-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/spatial_quick.yaml
+      - --server-url
+      - ws://oft-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      # Bind-mount configs so newly added benchmark YAMLs are picked up
+      # without rebuilding the libero image.
+      - ../../configs:/workspace/configs:ro
+    # MuJoCo's EGL renderer needs the NVIDIA GPU's `graphics` capability;
+    # compose's default `gpu` only enables compute+utility, which segfaults
+    # robosuite during env reset.
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

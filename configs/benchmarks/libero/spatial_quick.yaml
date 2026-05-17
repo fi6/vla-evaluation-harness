@@ -1,0 +1,20 @@
+# LIBERO-Spatial quick eval — 5 tasks × 5 episodes (25 episodes total).
+# Sized for fast cross-eval smoke runs; the model gets a meaningful but
+# not statistically tight success rate in ~10 min on a single GPU.
+server:
+  url: "ws://localhost:8000"
+
+docker:
+  image: ghcr.io/allenai/vla-evaluation-harness/libero:latest
+
+output_dir: "./results"
+
+benchmarks:
+  - benchmark: "vla_eval.benchmarks.libero.benchmark:LIBEROBenchmark"
+    subname: libero_spatial_quick
+    episodes_per_task: 5
+    max_tasks: 5
+    params:
+      suite: libero_spatial
+      seed: 42
+      num_steps_wait: 10

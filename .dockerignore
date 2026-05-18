@@ -9,9 +9,7 @@
 !docker/*_entrypoint.sh
 !docker/*.patch
 !docker/model_servers/preflight.py
-!docker/model_servers/entrypoint_molmobot.sh
-!docker/model_servers/entrypoint_groot.sh
-!docker/model_servers/entrypoint_starvla.sh
+!docker/model_servers/entrypoint_*.sh
 
 !docker/apply_eef_pos_patch.py
 !docker/xvla_sink_camera.py

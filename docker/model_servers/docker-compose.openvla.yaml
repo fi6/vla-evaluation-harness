@@ -30,14 +30,15 @@ services:
       # Optional HuggingFace mirror, e.g. https://hf-mirror.com
       HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
     volumes:
-      # Use absolute paths — `~` expands to the snap-confined path
-      # (~/snap/docker/...) under snap-installed Docker, which has an
-      # empty HF/triton cache. Mounting only the HF model cache (not
+      # Use ${HOME} instead of ~ — under snap-installed Docker, ~ expands
+      # to ~/snap/docker/... (a confined path with an empty cache).
+      # ${HOME} is resolved from the shell environment and always points
+      # to the real home directory. Mounting only the HF model cache (not
       # the entire ~/.cache) avoids shadowing the uv environment baked
       # into the image.
-      - /home/user/.cache/huggingface:/root/.cache/huggingface
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
       # Persist triton kernel cache across restarts (first inference compiles kernels).
-      - /home/user/.triton:/root/.triton
+      - ${HOME}/.triton:/root/.triton
       - ../../results:/workspace/results
     # The HTTP /config endpoint becomes available once the model is fully loaded.
     # libero waits for this before starting.

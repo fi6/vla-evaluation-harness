@@ -38,11 +38,12 @@ services:
       # which can take hours on a slow link even with all files present.
       HF_HUB_OFFLINE: "1"
     volumes:
-      # Use absolute paths — `~` expands to the snap-confined path
-      # (~/snap/docker/...) under snap-installed Docker, where the HF
-      # cache and triton kernel cache are not actually populated.
-      - /home/user/.cache/huggingface:/root/.cache/huggingface
-      - /home/user/.triton:/root/.triton
+      # Use ${HOME} instead of ~ — under snap-installed Docker, ~ expands
+      # to ~/snap/docker/... (a confined path with an empty cache).
+      # ${HOME} is resolved from the shell environment and always points
+      # to the real home directory.
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${HOME}/.triton:/root/.triton
       - ../../results:/workspace/results
     # Cold-start budget — see Dockerfile.openvla for rationale.
     healthcheck:

@@ -159,6 +159,7 @@ class OFTModelServer(PredictModelServer):
         assert self._vla is not None and self._cfg is not None
 
         # Build OFT observation dict — get_vla_action expects numpy arrays (uint8 HWC)
+        t_pre = time.perf_counter()
         images_dict = obs.get("images", {})
         keys = list(images_dict.keys()) if isinstance(images_dict, dict) else []
         primary_img = (
@@ -178,7 +179,7 @@ class OFTModelServer(PredictModelServer):
             oft_obs["state"] = np.zeros(PROPRIO_DIM, dtype=np.float64)
 
         task_desc = obs.get("task_description", "")
-        t0 = time.perf_counter()
+        t_infer = time.perf_counter()
         actions = get_vla_action(
             self._cfg,
             self._vla,
@@ -188,9 +189,9 @@ class OFTModelServer(PredictModelServer):
             self._action_head,
             self._proprio_projector,
         )
-        latency_ms = (time.perf_counter() - t0) * 1000
-        logger.info("inference latency: %.1f ms", latency_ms)
-        print(f"inference latency: {latency_ms:.1f} ms", flush=True)
+        infer_ms = (time.perf_counter() - t_infer) * 1000
+        self._log_latency(ctx, (t_infer - t_pre) * 1000, infer_ms)
+        logger.info("inference latency: %.1f ms", infer_ms)
 
         # Gripper: RLDS [0=close,1=open] → robosuite [-1=open,+1=close]
         actions_arr = np.asarray(actions, dtype=np.float32)

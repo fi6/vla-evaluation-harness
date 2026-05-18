@@ -129,6 +129,7 @@ class OpenVLAModelServer(PredictModelServer):
         assert self._model is not None
         assert self._processor is not None
 
+        t_pre = time.perf_counter()
         pil_image = self._preprocess_image(obs)
         task_description = obs.get("task_description", "")
         prompt = f"In: What action should the robot take to {task_description}?\nOut:"
@@ -139,9 +140,11 @@ class OpenVLAModelServer(PredictModelServer):
         if self.unnorm_key:
             kwargs["unnorm_key"] = self.unnorm_key
 
-        t0 = time.perf_counter()
+        t_infer = time.perf_counter()
         action = self._model.predict_action(**inputs, **kwargs)
-        logger.info("inference latency: %.1f ms", (time.perf_counter() - t0) * 1000)
+        infer_ms = (time.perf_counter() - t_infer) * 1000
+        self._log_latency(ctx, (t_infer - t_pre) * 1000, infer_ms)
+        logger.info("inference latency: %.1f ms", infer_ms)
 
         # Gripper: RLDS [0=close,1=open] → robosuite [-1=open,+1=close]
         action_arr = np.asarray(action, dtype=np.float32)

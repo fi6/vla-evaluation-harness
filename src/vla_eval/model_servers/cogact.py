@@ -115,10 +115,14 @@ class CogACTModelServer(PredictModelServer):
     def predict(self, obs: Observation, ctx: SessionContext) -> Action:
         self._load_model()
         assert self._model is not None
+        import time
 
+        t_pre = time.perf_counter()
         pil_image = self._obs_to_pil(obs)
         prompt = obs.get("task_description", "")
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
 
+        t_infer = time.perf_counter()
         actions, _ = self._model.predict_action(
             pil_image,
             prompt,
@@ -127,15 +131,20 @@ class CogACTModelServer(PredictModelServer):
             use_ddim=self.use_ddim,
             num_ddim_steps=self.num_ddim_steps,
         )
+        self._log_latency(ctx, preprocess_ms, (time.perf_counter() - t_infer) * 1000)
         return {"actions": actions}
 
     def predict_batch(self, obs_batch: list[Observation], ctx_batch: list[SessionContext]) -> list[dict[str, Any]]:
         self._load_model()
         assert self._model is not None
+        import time
 
+        t_pre = time.perf_counter()
         pil_images = [self._obs_to_pil(obs) for obs in obs_batch]
         prompts = [obs.get("task_description", "") for obs in obs_batch]
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
 
+        t_infer = time.perf_counter()
         actions, _ = self._model.predict_action_batch(
             pil_images,
             prompts,
@@ -144,6 +153,7 @@ class CogACTModelServer(PredictModelServer):
             use_ddim=self.use_ddim,
             num_ddim_steps=self.num_ddim_steps,
         )
+        self._log_latency(ctx_batch[0], preprocess_ms, (time.perf_counter() - t_infer) * 1000, interval=1)
         return [{"actions": actions[i]} for i in range(len(obs_batch))]
 
 

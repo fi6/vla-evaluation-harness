@@ -1,0 +1,83 @@
+name: vla-eval-cogact
+# CogACT model server + LIBERO benchmark — combined stack.
+#
+# Full eval (cogact waits to load, then libero starts automatically):
+#   docker compose -f docker/model_servers/docker-compose.cogact.yaml up
+#
+# Model server only (run the benchmark separately on the host):
+#   docker compose -f docker/model_servers/docker-compose.cogact.yaml up cogact-server
+
+services:
+  cogact-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-cogact:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.cogact
+    ports:
+      - "8000:8000"
+    command:
+      - --model_path
+      - CogACT/CogACT-Base
+      - --action_model_type
+      - DiT-B
+      - --future_action_window_size
+      - "15"
+      - --unnorm_key
+      - bridge_orig
+      - --chunk_size
+      - "16"
+      - --port
+      - "8000"
+    environment:
+      # Optional HuggingFace mirror, e.g. https://hf-mirror.com
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      HF_TOKEN: "${HF_TOKEN}"
+    volumes:
+      # Mount only the HF model cache, not the entire ~/.cache.
+      # Mounting ~/.cache would shadow the uv environment baked into the image,
+      # forcing a re-install from PyPI on every start.
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      # Persist triton kernel cache across restarts (first inference compiles kernels).
+      - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
+    # The HTTP /config endpoint becomes available once the model is fully loaded.
+    # libero waits for this before starting.
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      cogact-server:
+        condition: service_healthy
+    # Entrypoint is already `conda run -n libero vla-eval`; override only the args.
+    # --server-url points to the cogact-server service on the compose network.
+    # _inside_docker() is True here so vla-eval skips the Docker wrapper automatically.
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/10.yaml
+      - --server-url
+      - ws://cogact-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

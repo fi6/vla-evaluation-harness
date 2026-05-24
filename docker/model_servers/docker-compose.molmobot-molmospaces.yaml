@@ -1,0 +1,69 @@
+name: vla-eval-molmobot-molmospaces
+# MolmoBot model server + MolmoSpaces benchmark — combined stack.
+#
+# Full eval (molmobot waits to load, then molmospaces starts automatically):
+#   docker compose -f docker/model_servers/docker-compose.molmobot-molmospaces.yaml up
+#
+# Model server only:
+#   docker compose -f docker/model_servers/docker-compose.molmobot-molmospaces.yaml up molmobot-server
+
+services:
+  molmobot-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-molmobot:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.molmobot
+    ports:
+      - "8000:8000"
+    command:
+      - --hf_repo
+      - allenai/MolmoBot-DROID
+      - --execute_horizon
+      - "8"
+      - --states_mode
+      - cross_attn
+      - --max_joint_delta
+      - "0.2"
+      - --port
+      - "8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  molmospaces:
+    image: ghcr.io/allenai/vla-evaluation-harness/molmospaces:local
+    depends_on:
+      molmobot-server:
+        condition: service_healthy
+    # Benchmark assets (~15 GB) are baked into the image; no volume mount needed.
+    # Entrypoint is `conda run -n molmospaces vla-eval`; override only the args.
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/molmospaces/pick_and_place.yaml
+      - --server-url
+      - ws://molmobot-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]

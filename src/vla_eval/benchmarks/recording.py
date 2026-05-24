@@ -66,16 +66,17 @@ import string
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
 if TYPE_CHECKING:
     import numpy as np
+    # Python 3.8: collections.abc.Callable is not subscriptable at runtime;
+    # guard this alias so it only exists for static type checkers.
+    FilenameSpec = Union[str, Callable[[Mapping[str, Any]], str]]
+else:
+    FilenameSpec = object
 
 logger = logging.getLogger(__name__)
-
-# A `str.format`-style template, or a callable taking the resolved context (caller's start() context +
-# injected ``status``) and returning a filename relative to ``output_dir``.
-FilenameSpec = str | Callable[[Mapping[str, Any]], str]
 
 
 class EpisodeVideoRecorder:
@@ -96,6 +97,8 @@ class EpisodeVideoRecorder:
         required_context: Sequence[str] | None = None,
         fps: int = 20,
         overwrite: bool = False,
+        max_success: int | None = None,
+        max_fail: int | None = None,
     ) -> None:
         """
         Args:
@@ -117,6 +120,10 @@ class EpisodeVideoRecorder:
             fps: Output framerate.
             overwrite: When False (default), ``save()`` raises ``FileExistsError`` if the resolved final
                 path is already taken.  When True, an existing file is replaced.
+            max_success: Maximum number of successful episodes to save.  Once reached, further
+                successful episodes are discarded.  ``None`` (default) means no limit.
+            max_fail: Maximum number of failed episodes to save.  Once reached, further failed
+                episodes are discarded.  ``None`` means no limit.
         """
         self.output_dir = Path(output_dir)
         self._filename_spec = filename
@@ -130,6 +137,12 @@ class EpisodeVideoRecorder:
             required_context = _fields_from_template(filename)
         self._required_context = tuple(required_context)
         self._overwrite = overwrite
+        self._max_per_status: dict[str, int] = {}
+        if max_success is not None:
+            self._max_per_status["success"] = max_success
+        if max_fail is not None:
+            self._max_per_status["fail"] = max_fail
+        self._saved_per_status: dict[str, int] = {}
 
         # One working file per recorder instance, reused across episodes.  Hidden (`.recorder-`) so it
         # doesn't show up in casual listings, uuid-suffixed so concurrent recorders sharing output_dir
@@ -218,6 +231,12 @@ class EpisodeVideoRecorder:
         if not self.active:
             return None
 
+        # Discard if this status has reached its cap.
+        limit = self._max_per_status.get(status)
+        if limit is not None and self._saved_per_status.get(status, 0) >= limit:
+            self.discard()
+            return None
+
         writer, context = self._writer, self._context
         frames_written = self._frames_written
         # Reset state up front: any return path below leaves the recorder inactive.
@@ -255,6 +274,7 @@ class EpisodeVideoRecorder:
             _safe_unlink(self._working_path)
             return None
 
+        self._saved_per_status[status] = self._saved_per_status.get(status, 0) + 1
         logger.info("Saved episode video: %s (%d frames)", final_path, frames_written)
         return final_path
 

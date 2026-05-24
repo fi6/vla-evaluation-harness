@@ -36,6 +36,7 @@ services:
       # Persist triton kernel cache across restarts (first inference compiles kernels).
       - ~/.triton:/root/.triton
       - ../../results:/workspace/results
+      - ../../src/vla_eval/model_servers/groot.py:/workspace/src/vla_eval/model_servers/groot.py:ro
     # The HTTP /config endpoint becomes available once the model is fully loaded.
     # libero waits for this before starting.
     healthcheck:
@@ -62,12 +63,13 @@ services:
     command:
       - run
       - --config
-      - /workspace/configs/benchmarks/libero/quick.yaml
+      - /workspace/configs/benchmarks/libero/video_groot.yaml
       - --server-url
       - ws://groot-server:8000
       - -y
     volumes:
       - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
     deploy:
       resources:
         reservations:

@@ -68,12 +68,13 @@ services:
     command:
       - run
       - --config
-      - /workspace/configs/benchmarks/libero/quick.yaml
+      - /workspace/configs/benchmarks/libero/video_pi0.yaml
       - --server-url
       - ws://pi0-server:8000
       - -y
     volumes:
       - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
     deploy:
       resources:
         reservations:

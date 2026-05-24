@@ -11,6 +11,7 @@ import numpy as np
 
 from vla_eval.benchmarks.base import StepBenchmark, StepResult
 from vla_eval.benchmarks.libero.utils import preprocess_libero_image
+from vla_eval.benchmarks.recording import EpisodeVideoRecorder
 from vla_eval.rotation import matrix_to_quat, quat_to_axisangle
 from vla_eval.specs import (
     GRIPPER_CLOSE_POS,
@@ -86,6 +87,11 @@ class LIBEROBenchmark(StepBenchmark):
             When None, uses ``MAX_STEP_MAPPING[suite]``.
         env_seed: Seed for ``env.seed()``.  When None, defaults to ``seed``.
             OpenVLA reference uses ``env_seed=0`` separately from ``seed=7``.
+        recording: Optional dict enabling per-episode video recording.
+            Supported keys: ``output_dir`` (default ``/workspace/results/videos``),
+            ``fps`` (default 20).  When None (default), no videos are saved.
+            Example YAML: ``recording: {output_dir: /workspace/results/videos}``.
+            Videos are named ``task{task_id:02d}_ep{episode_idx:04d}_{status}.mp4``.
     """
 
     def __init__(
@@ -99,6 +105,7 @@ class LIBEROBenchmark(StepBenchmark):
         max_steps: int | None = None,
         env_seed: int | None = None,
         quat_no_antipodal: bool = False,
+        recording: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
         self.suite = suite
@@ -113,8 +120,21 @@ class LIBEROBenchmark(StepBenchmark):
         self._env = None
         self._task_suite = None
         self._current_task_id: int | None = None
+        self._recorder: EpisodeVideoRecorder | None = (
+            EpisodeVideoRecorder(
+                output_dir=recording.get("output_dir", "/workspace/results/videos"),
+                filename="task{task_id:02d}_ep{episode_idx:04d}_{status}.mp4",
+                fps=recording.get("fps", 20),
+                max_success=recording.get("max_success"),
+                max_fail=recording.get("max_fail"),
+            )
+            if recording is not None
+            else None
+        )
 
     def cleanup(self) -> None:
+        if self._recorder is not None:
+            self._recorder.discard()
         if self._env is not None:
             try:
                 self._env.close()
@@ -206,6 +226,9 @@ class LIBEROBenchmark(StepBenchmark):
             for robot in self._env.robots:
                 robot.controller.use_delta = False
 
+        if self._recorder is not None:
+            self._recorder.start({"task_id": task_id, "episode_idx": episode_idx})
+
         return obs
 
     def step(self, action: Action) -> StepResult:
@@ -227,6 +250,9 @@ class LIBEROBenchmark(StepBenchmark):
 
     def make_obs(self, raw_obs: Any, task: Task) -> Observation:
         img = preprocess_libero_image(raw_obs["agentview_image"], LIBERO_ENV_RESOLUTION)
+
+        if self._recorder is not None:
+            self._recorder.record(img)
 
         obs_dict: dict[str, Any] = {
             "images": {"agentview": img},
@@ -262,6 +288,8 @@ class LIBEROBenchmark(StepBenchmark):
         return step_result.done
 
     def get_step_result(self, step_result: StepResult) -> EpisodeResult:
+        if self._recorder is not None:
+            self._recorder.save(status="success" if step_result.done else "fail")
         return {"success": step_result.done}
 
     def get_metadata(self) -> dict[str, Any]:

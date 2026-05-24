@@ -69,12 +69,13 @@ services:
     command:
       - run
       - --config
-      - /workspace/configs/benchmarks/libero/quick.yaml
+      - /workspace/configs/benchmarks/libero/video_starvla.yaml
       - --server-url
       - ws://starvla-server:8000
       - -y
     volumes:
       - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
     deploy:
       resources:
         reservations:

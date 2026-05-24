@@ -23,11 +23,22 @@ set -euo pipefail
 # `huggingface_hub.snapshot_download` which always touches the network even
 # for cached repos. The model loader itself respects HF_HUB_OFFLINE and will
 # happily read from the local cache.
+REPO="moojink/openvla-7b-oft-finetuned-libero-10"
+
 if [ "${HF_HUB_OFFLINE:-0}" = "1" ]; then
     echo "[entrypoint] HF_HUB_OFFLINE=1 — skipping preflight"
 else
-    python /workspace/docker/model_servers/preflight.py \
-        moojink/openvla-7b-oft-finetuned-libero-spatial
+    python /workspace/docker/model_servers/preflight.py "$REPO"
 fi
 
-exec python /workspace/src/vla_eval/model_servers/oft.py "$@"
+# Auto-detect local snapshot path (openvla-oft needs a real directory, not a repo ID)
+SNAP=$(ls -d /root/.cache/huggingface/hub/models--moojink--openvla-7b-oft-finetuned-libero-10/snapshots/* 2>/dev/null | head -1)
+if [ -z "$SNAP" ]; then
+    echo "[entrypoint] ERROR: snapshot not found for $REPO" >&2
+    exit 1
+fi
+
+exec python /workspace/src/vla_eval/model_servers/oft.py \
+    --pretrained_checkpoint "$SNAP" \
+    --unnorm_key libero_10_no_noops \
+    "$@"

@@ -19,7 +19,7 @@ set -euo pipefail
 
 # Use uv for the preflight (it has its own tiny inline-script env).
 uv run --python 3.11 /workspace/docker/model_servers/preflight.py \
-    openvla/openvla-7b-finetuned-libero-spatial
+    openvla/openvla-7b-finetuned-libero-10
 
 # For the model server itself we bypass `uv run` and exec the pre-built
 # venv's Python directly. This avoids a re-resolution / re-link step at

@@ -17,9 +17,9 @@ services:
       - "8000:8000"
     command:
       - --model_path
-      - openvla/openvla-7b-finetuned-libero-spatial
+      - openvla/openvla-7b-finetuned-libero-10
       - --unnorm_key
-      - libero_spatial
+      - libero_10
       - --chunk_size
       - "1"
       - --jpeg_roundtrip
@@ -40,6 +40,7 @@ services:
       # Persist triton kernel cache across restarts (first inference compiles kernels).
       - ${HOME}/.triton:/root/.triton
       - ../../results:/workspace/results
+      - ./entrypoint_openvla.sh:/workspace/docker/model_servers/entrypoint_openvla.sh:ro
     # The HTTP /config endpoint becomes available once the model is fully loaded.
     # libero waits for this before starting.
     # Cold-start budget here is generous: on slow networks `uv run` does a
@@ -68,7 +69,7 @@ services:
     command:
       - run
       - --config
-      - /workspace/configs/benchmarks/libero/spatial_quick.yaml
+      - /workspace/configs/benchmarks/libero/video_openvla.yaml
       - --server-url
       - ws://openvla-server:8000
       - -y

@@ -6,4 +6,5 @@ args:
   image_resolution: 256
   chunk_size: 1
   bridge_rotation: true
+  observation_params: '{"send_wrist_image": false}'
   port: 8000

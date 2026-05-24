@@ -60,6 +60,7 @@ class GR00TModelServer(PredictModelServer):
         invert_gripper: bool = False,
         image_resolution: int | None = None,
         bridge_rotation: bool = False,
+        simpler_state: bool = False,
         observation_params: str | dict | None = None,
         *,
         chunk_size: int = 16,
@@ -74,6 +75,7 @@ class GR00TModelServer(PredictModelServer):
         self.invert_gripper = invert_gripper
         self.image_resolution = image_resolution
         self.bridge_rotation = bridge_rotation
+        self.simpler_state = simpler_state
         self._extra_obs_params: dict[str, Any] = {}
         if observation_params:
             import json
@@ -176,6 +178,7 @@ class GR00TModelServer(PredictModelServer):
 
     def get_observation_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {
+            "send_wrist_image": True,
             "send_state": True,
             "max_episode_steps": 300,
             "success_mode": "accumulate",
@@ -251,9 +254,10 @@ class GR00TModelServer(PredictModelServer):
                 continue
             state_arr = np.asarray(raw_state, dtype=np.float32).flatten()
 
-            # State transformation for SimplerEnv.
-            # eef_pos from ManiSkill2: [x, y, z, qw, qx, qy, qz, gripper_openness]
-            if len(state_arr) >= 8:
+            # State transformation for SimplerEnv only.
+            # ManiSkill2 eef_pos: [x, y, z, qw, qx, qy, qz, gripper_openness]
+            # LIBERO state is already [pos3, axis_angle3, gripper2] — pass through as-is.
+            if len(state_arr) >= 8 and (self.bridge_rotation or self.simpler_state):
                 if self.bridge_rotation:
                     # WidowX: convert quaternion to bridge-frame euler angles
                     quat_xyzw = quat_wxyz_to_xyzw(state_arr[3:7])

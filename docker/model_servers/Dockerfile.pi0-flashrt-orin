@@ -1,0 +1,65 @@
+# FlashRT-backed pi0.5 model server for Jetson Orin.
+#
+# This image intentionally lives beside Dockerfile.pi0 instead of replacing it:
+# the regular pi0 image is still useful for testing OpenPI's own PyTorch/JAX
+# paths on other machines.
+#
+# Prerequisite: build the Jetson OpenPI PyTorch image:
+#   docker build -f docker/model_servers/Dockerfile.pi0-orin \
+#     -t jetson-openpi-torch:pi0-orin .
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.pi0-flashrt-orin \
+#     -t jetson-openpi-flashrt:sm87-test \
+#     .
+
+ARG BASE_IMAGE=jetson-openpi-torch:pi0-orin
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    PYTHONPATH=/workspace/src:/opt/openpi-embedded/src:/opt/openpi-embedded/packages/openpi-client/src:/opt/FlashRT
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git cmake ninja-build ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir pybind11 ninja sentencepiece
+
+ARG FLASHRT_REPO=https://github.com/LiangSu8899/FlashRT.git
+ARG FLASHRT_REF=main
+ARG CUTLASS_REF=v4.4.2
+
+RUN git clone --depth 1 --branch "${FLASHRT_REF}" "${FLASHRT_REPO}" /opt/FlashRT \
+    && git clone --depth 1 --branch "${CUTLASS_REF}" https://github.com/NVIDIA/cutlass.git \
+        /opt/FlashRT/third_party/cutlass
+
+COPY docker/model_servers/patches/flashrt_openpi_embed_tokens.patch /tmp/flashrt_openpi_embed_tokens.patch
+RUN cd /opt/FlashRT && patch -p1 < /tmp/flashrt_openpi_embed_tokens.patch
+
+RUN cd /opt/FlashRT \
+    && python3 -m pip install --no-cache-dir -e . \
+    && cmake -B build_orin_sm87 -S . -G Ninja \
+        -DGPU_ARCH=87 \
+        -DFA2_ARCH_NATIVE_ONLY=ON \
+        -DFA2_HDIMS="96;128;256" \
+        -DFA2_DTYPES="bf16" \
+        -DPython3_EXECUTABLE=/usr/bin/python3 \
+    && cmake --build build_orin_sm87 -j4
+
+WORKDIR /workspace
+
+ENTRYPOINT ["python3", "-u", "/workspace/tools/pi0_flashrt_server_entry.py"]
+CMD [ \
+    "--checkpoint", "/root/.cache/openpi/openpi-assets/checkpoints/pi05_libero_pytorch", \
+    "--cache_frames", "1", \
+    "--num_views", "2", \
+    "--num_steps", "10", \
+    "--vision_pool_factor", "1", \
+    "--vision_num_layers", "27", \
+    "--chunk_size", "10", \
+    "--port", "8000" \
+]

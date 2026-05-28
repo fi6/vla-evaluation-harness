@@ -1,0 +1,17 @@
+diff --git a/flash_rt/frontends/torch/pi05_rtx.py b/flash_rt/frontends/torch/pi05_rtx.py
+--- a/flash_rt/frontends/torch/pi05_rtx.py
++++ b/flash_rt/frontends/torch/pi05_rtx.py
+@@ -286,7 +286,12 @@ def _convert_openpi_pi05_state_dict(state_dict: dict[str, torch.Tensor]) -> dict[
+     ckpt["decoder_action_out_proj_b"] = g("action_out_proj.bias")
+ 
+     # ── Embedding matrix (for prompt tokenisation) ──
+-    ckpt["embedding_weight"] = g("paligemma_with_expert.paligemma.lm_head.weight")
++    try:
++        ckpt["embedding_weight"] = g("paligemma_with_expert.paligemma.lm_head.weight")
++    except Exception:
++        ckpt["embedding_weight"] = g(
++            "paligemma_with_expert.paligemma.model.language_model.embed_tokens.weight"
++        )
+ 
+     logger.info("Converted %d weight groups", len(ckpt))
+     return ckpt

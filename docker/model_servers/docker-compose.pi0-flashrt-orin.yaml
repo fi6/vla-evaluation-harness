@@ -1,0 +1,100 @@
+name: vla-eval-pi0-flashrt-orin
+
+# FlashRT pi0.5 on Jetson Orin.
+#
+# BF16 smoke:
+#   docker compose -f docker/model_servers/docker-compose.pi0-flashrt-orin.yaml --profile bf16 up
+#
+# INT8 W8A8 smoke:
+#   docker compose -f docker/model_servers/docker-compose.pi0-flashrt-orin.yaml --profile int8 up
+#
+# Both profiles run the same LIBERO smoke benchmark and write normal harness
+# latency logs under results/flashrtpi05_*_latency.jsonl.
+
+x-pi0-flashrt-common: &pi0-flashrt-common
+  image: jetson-openpi-flashrt:sm87-test
+  build:
+    context: ../..
+    dockerfile: docker/model_servers/Dockerfile.pi0-flashrt-orin
+    args:
+      BASE_IMAGE: jetson-openpi-torch:pi0-orin
+  runtime: nvidia
+  volumes:
+    - ../../:/workspace:ro
+    - ../../results:/workspace/results
+    - ${HOME}/.cache/openpi:/root/.cache/openpi
+    - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+  environment:
+    PYTHONPATH: /workspace/src:/opt/openpi-embedded/src:/opt/openpi-embedded/packages/openpi-client/src:/opt/FlashRT
+  command:
+    - --checkpoint
+    - /root/.cache/openpi/openpi-assets/checkpoints/pi05_libero_pytorch
+    - --cache_frames
+    - "1"
+    - --num_views
+    - "2"
+    - --num_steps
+    - "10"
+    - --vision_pool_factor
+    - "1"
+    - --vision_num_layers
+    - "27"
+    - --chunk_size
+    - "10"
+    - --port
+    - "8000"
+
+x-libero-smoke-common: &libero-smoke-common
+  image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+  runtime: nvidia
+  command:
+    - run
+    - --config
+    - /workspace/configs/benchmarks/libero/smoke_test.yaml
+    - --server-url
+    - ws://127.0.0.1:8000
+    - -y
+  volumes:
+    - ../../results:/workspace/results
+    - ../../configs:/workspace/configs:ro
+
+services:
+  pi0-flashrt-bf16:
+    <<: *pi0-flashrt-common
+    profiles: ["bf16"]
+
+  libero-bf16:
+    <<: *libero-smoke-common
+    profiles: ["bf16"]
+    network_mode: service:pi0-flashrt-bf16
+    depends_on:
+      - pi0-flashrt-bf16
+
+  pi0-flashrt-int8:
+    <<: *pi0-flashrt-common
+    profiles: ["int8"]
+    command:
+      - --checkpoint
+      - /root/.cache/openpi/openpi-assets/checkpoints/pi05_libero_pytorch
+      - --int8
+      - --cache_frames
+      - "1"
+      - --num_views
+      - "2"
+      - --num_steps
+      - "10"
+      - --vision_pool_factor
+      - "1"
+      - --vision_num_layers
+      - "27"
+      - --chunk_size
+      - "10"
+      - --port
+      - "8000"
+
+  libero-int8:
+    <<: *libero-smoke-common
+    profiles: ["int8"]
+    network_mode: service:pi0-flashrt-int8
+    depends_on:
+      - pi0-flashrt-int8

@@ -1,0 +1,72 @@
+name: vla-eval-pi0-orin
+
+# OpenPI pi0.5 PyTorch on Jetson Orin.
+#
+# Model server:
+#   docker compose -f docker/model_servers/docker-compose.pi0-orin.yaml up pi0-server
+#
+# Smoke benchmark:
+#   docker compose -f docker/model_servers/docker-compose.pi0-orin.yaml --profile smoke up
+
+services:
+  pi0-server:
+    image: jetson-openpi-torch:pi0-orin
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.pi0-orin
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    command:
+      - --config_name
+      - pi05_libero
+      - --backend
+      - pytorch
+      - --checkpoint
+      - /root/.cache/openpi/openpi-assets/checkpoints/pi05_libero_pytorch
+      - --image_key
+      - observation/image
+      - --wrist_image_key
+      - observation/wrist_image
+      - --state_key
+      - observation/state
+      - --state_dim
+      - "8"
+      - --image_resolution
+      - "224"
+      - --chunk_size
+      - "10"
+      - --port
+      - "8000"
+    environment:
+      XLA_PYTHON_CLIENT_PREALLOCATE: "false"
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      PYTHONPATH: /workspace/src
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ${HOME}/.cache/openpi:/root/.cache/openpi
+      - ../../results:/workspace/results
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+
+  libero-smoke:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero-orin:local
+    profiles: ["smoke"]
+    runtime: nvidia
+    depends_on:
+      pi0-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/smoke_test.yaml
+      - --server-url
+      - ws://pi0-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro

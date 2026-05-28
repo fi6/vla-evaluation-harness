@@ -1,0 +1,51 @@
+# OpenPI pi0.5 PyTorch model server for Jetson Orin.
+#
+# This image is separate from Dockerfile.pi0 so the existing x86_64/CUDA path
+# remains available for other machines.
+#
+# Build from repo root:
+#   docker build -f docker/model_servers/Dockerfile.pi0-orin \
+#     -t jetson-openpi-torch:pi0-orin .
+
+# This base is the verified Jetson/OpenPI image from the Orin smoke tests. It
+# uses the working layout from the manual setup:
+#
+#   /opt/openpi-embedded/src
+#   /opt/openpi-embedded/packages/openpi-client/src
+#
+# and exposes both through PYTHONPATH. Avoid pip-installing OpenPI itself here:
+# OpenPI's full pyproject currently pulls JAX/SciPy dependencies that require
+# Python >=3.11, while JetPack r36.4 ships Python 3.10.
+ARG BASE_IMAGE=jetson-openpi-torch:pi0-test
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    XLA_PYTHON_CLIENT_PREALLOCATE=false \
+    PYTHONPATH=/workspace/src:/opt/openpi-embedded/src:/opt/openpi-embedded/packages/openpi-client/src
+
+WORKDIR /workspace
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/entrypoint_pi0_orin.py docker/model_servers/entrypoint_pi0_orin.py
+
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+ENTRYPOINT ["python3", "-u", "/workspace/docker/model_servers/entrypoint_pi0_orin.py"]
+CMD [ \
+    "--config_name", "pi05_libero", \
+    "--backend", "pytorch", \
+    "--checkpoint", "/root/.cache/openpi/openpi-assets/checkpoints/pi05_libero_pytorch", \
+    "--image_key", "observation/image", \
+    "--wrist_image_key", "observation/wrist_image", \
+    "--state_key", "observation/state", \
+    "--state_dim", "8", \
+    "--image_resolution", "224", \
+    "--chunk_size", "10", \
+    "--port", "8000" \
+]

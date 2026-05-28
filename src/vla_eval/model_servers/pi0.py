@@ -24,6 +24,7 @@ in-process.  No external server required.
 from __future__ import annotations
 
 import logging
+import platform
 from typing import Any
 
 import time
@@ -51,6 +52,7 @@ class Pi0ModelServer(PredictModelServer):
         state_key: str | None = "observation/state",
         state_dim: int = 8,
         image_resolution: int | None = None,
+        backend: str = "auto",
         *,
         chunk_size: int = 10,
         action_ensemble: str = "newest",
@@ -65,6 +67,7 @@ class Pi0ModelServer(PredictModelServer):
         self.state_key = None if state_key in (None, "None", "none") else state_key
         self.state_dim = state_dim
         self.image_resolution = image_resolution
+        self.backend = backend
         self._policy = None
 
     def _maybe_resize(self, img: np.ndarray) -> np.ndarray:
@@ -80,19 +83,38 @@ class Pi0ModelServer(PredictModelServer):
     def _load_model(self) -> None:
         if self._policy is not None:
             return
+        backend = self.backend.lower()
+        if backend not in ("auto", "jax", "pytorch"):
+            raise ValueError(f"Unsupported pi0 backend: {self.backend!r}; expected auto, jax, or pytorch")
+
+        if backend == "auto":
+            backend = "pytorch" if platform.machine() in ("aarch64", "arm64") else "jax"
+
         from openpi.policies import policy_config
         from openpi.training import config as _config
 
-        logger.info("Loading OpenPI config: %s", self.config_name)
+        logger.info("Loading OpenPI config: %s (%s backend)", self.config_name, backend)
         config = _config.get_config(self.config_name)
 
         checkpoint = self.checkpoint
         if checkpoint is None:
             checkpoint = f"gs://openpi-assets/checkpoints/{self.config_name}"
 
+        if backend == "pytorch":
+            try:
+                import openpi.models_pytorch  # noqa: F401
+            except ImportError as exc:
+                raise RuntimeError(
+                    "OpenPI PyTorch backend requested but openpi.models_pytorch could not be imported"
+                ) from exc
+            logger.info("Loading policy from checkpoint: %s", checkpoint)
+            self._policy = policy_config.create_trained_policy(config, checkpoint)
+            logger.info("π₀ policy loaded successfully (PyTorch backend).")
+            return
+
         logger.info("Loading policy from checkpoint: %s", checkpoint)
         self._policy = policy_config.create_trained_policy(config, checkpoint)
-        logger.info("π₀ policy loaded successfully.")
+        logger.info("π₀ policy loaded successfully (JAX backend).")
 
     def get_observation_params(self) -> dict[str, Any]:
         params: dict[str, Any] = {}

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -234,6 +235,7 @@ class CogACTModelServer(PredictModelServer):
         assert self._model is not None
         assert self._tokenizer is not None
 
+        t_pre = time.perf_counter()
         pil_images = self._obs_to_pil_images(obs)
         image_tensor = self._model.process_images(pil_images).to(dtype=self._model.dtype)
         if len(pil_images) > 1:
@@ -253,12 +255,15 @@ class CogACTModelServer(PredictModelServer):
             .to(self._model.device)
         )
 
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
+        t_infer = time.perf_counter()
         with torch.inference_mode():
             actions = self._model.inference_action(
                 input_ids,
                 image_tensor,
                 {"cfg_scale": self.cfg_scale, "num_ddim_steps": self.num_ddim_steps, "action_norms": self._norm_stats},
             )
+        self._log_latency(ctx, preprocess_ms, (time.perf_counter() - t_infer) * 1000)
         raw_actions = np.array(actions, dtype=np.float32)
 
         joint_state = obs.get("joint_state")
@@ -276,6 +281,8 @@ class CogACTModelServer(PredictModelServer):
         assert self._model is not None
         assert self._tokenizer is not None
         B = len(obs_batch)
+
+        t_pre = time.perf_counter()
 
         # --- Preprocess all observations ---
         all_pil_images = []
@@ -315,6 +322,9 @@ class CogACTModelServer(PredictModelServer):
             attention_mask[i, : ids.shape[0]] = 1
         input_ids = padded.to(self._model.device)
         attention_mask = attention_mask.to(self._model.device)
+
+        preprocess_ms = (time.perf_counter() - t_pre) * 1000
+        t_infer = time.perf_counter()
 
         # --- Batched forward pass ---
         # Call model components directly to access the transformed attention_mask
@@ -388,6 +398,11 @@ class CogACTModelServer(PredictModelServer):
             )
             if self.cfg_scale > 1.0:
                 samples, _ = samples.chunk(2, dim=0)
+
+        infer_ms = (time.perf_counter() - t_infer) * 1000
+        per_obs_preprocess_ms = preprocess_ms / B if B else preprocess_ms
+        for ctx in ctx_batch:
+            self._log_latency(ctx, per_obs_preprocess_ms, infer_ms)
 
         # Denormalize each sample and optionally convert deltas to absolute
         results = []

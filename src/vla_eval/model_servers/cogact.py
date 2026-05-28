@@ -85,6 +85,13 @@ class CogACTModelServer(PredictModelServer):
         import torch
         from vla import load_vla
 
+        # load_vla's internal HfFileSystem() check reads the global huggingface_hub
+        # login state, not the hf_token kwarg — login first so the auth check passes.
+        hf_token = os.environ.get("HF_TOKEN")
+        if hf_token:
+            from huggingface_hub import login
+            login(token=hf_token, add_to_git_credential=False)
+
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         logger.info(
             "Loading CogACT from %s (type=%s, window=%d) on %s",
@@ -96,6 +103,7 @@ class CogACTModelServer(PredictModelServer):
 
         self._model = load_vla(
             self.model_path,
+            hf_token=hf_token,
             load_for_training=False,
             action_model_type=self.action_model_type,
             future_action_window_size=self.future_action_window_size,

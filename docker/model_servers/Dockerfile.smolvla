@@ -1,0 +1,57 @@
+# SmolVLA model server image.
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.smolvla \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-smolvla:local \
+#     .
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    TOKENIZERS_PARALLELISM=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates libglib2.0-0 libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+# Warm the Python + third-party dependency cache before copying repo sources.
+# This keeps large torch/CUDA wheels cached when only configs or local server code change.
+RUN uv run --python 3.12 --no-project \
+    --with "lerobot[smolvla]>=0.5.0" \
+    --with "torch>=2.0" \
+    --with "transformers>=5.3,<6" \
+    --with "pillow>=9.0" \
+    --with "numpy>=1.24" \
+    --with "huggingface_hub" \
+    python -c "import torch; import lerobot; import transformers"
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_smolvla.sh docker/model_servers/entrypoint_smolvla.sh
+RUN chmod +x docker/model_servers/entrypoint_smolvla.sh
+
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+RUN uv run --python 3.12 python -m py_compile src/vla_eval/model_servers/smolvla.py \
+    && rm -rf ~/.cache/pip
+
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_smolvla.sh"]
+CMD [ \
+    "--model_path",      "HuggingFaceVLA/smolvla_libero", \
+    "--image_key",       "observation.images.image", \
+    "--wrist_image_key", "observation.images.image2", \
+    "--state_key",       "observation.state", \
+    "--state_dim",       "8", \
+    "--device",          "cuda", \
+    "--port",            "8000" \
+]

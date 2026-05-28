@@ -1,0 +1,6 @@
+# SmolVLA model server — LIBERO checkpoint
+# Weight: HuggingFaceVLA/smolvla_libero (HuggingFace)
+# Benchmark: LIBERO
+extends: _base.yaml
+args:
+  model_path: HuggingFaceVLA/smolvla_libero

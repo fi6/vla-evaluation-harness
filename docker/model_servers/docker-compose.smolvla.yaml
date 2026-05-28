@@ -1,0 +1,75 @@
+name: vla-eval-smolvla
+# SmolVLA model server + LIBERO-10 benchmark — combined stack.
+#
+# Full eval:
+#   docker compose -f docker/model_servers/docker-compose.smolvla.yaml up --build
+#
+# Model server only:
+#   docker compose -f docker/model_servers/docker-compose.smolvla.yaml up --build smolvla-server
+
+services:
+  smolvla-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-smolvla:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.smolvla
+    ports:
+      - "8000:8000"
+    command:
+      - --model_path
+      - HuggingFaceVLA/smolvla_libero
+      - --image_key
+      - observation.images.image
+      - --wrist_image_key
+      - observation.images.image2
+      - --state_key
+      - observation.state
+      - --state_dim
+      - "8"
+      - --device
+      - cuda
+      - --port
+      - "8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      TOKENIZERS_PARALLELISM: "false"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 180s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      smolvla-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/10.yaml
+      - --server-url
+      - ws://smolvla-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

@@ -1,0 +1,9 @@
+# SmolVLA model server — shared base
+script: "src/vla_eval/model_servers/smolvla.py"
+args:
+  port: 8000
+  image_key: "observation.images.image"
+  wrist_image_key: "observation.images.image2"
+  state_key: "observation.state"
+  state_dim: 8
+  device: cuda

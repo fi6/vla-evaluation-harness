@@ -1,0 +1,49 @@
+# MolmoAct2 model server image (allenai/MolmoAct2-LIBERO via trust_remote_code).
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.molmoact2 \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-molmoact2:local \
+#     .
+#
+# No flash-attn or native compilation step — runtime image suffices.
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+# Copy harness source. molmoact2.py's PEP 723 inline metadata references vla-eval
+# as an editable install at path "../../.." relative to the script, which
+# resolves to /workspace — so the source must be present before `uv run`.
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_molmoact2.sh docker/model_servers/entrypoint_molmoact2.sh
+RUN chmod +x docker/model_servers/entrypoint_molmoact2.sh
+
+# hatch-vcs reads the version from git tags; Docker builds have no .git.
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+# Pre-install all dependencies declared in molmoact2.py's inline metadata
+# (torch 2.5.1, transformers 4.57.x, vla-eval editable, ...).
+RUN uv run --python 3.11 src/vla_eval/model_servers/molmoact2.py --help \
+    && rm -rf ~/.cache/pip
+
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_molmoact2.sh"]
+CMD [ \
+    "--hf_repo",    "allenai/MolmoAct2-LIBERO", \
+    "--chunk_size", "10", \
+    "--port",       "8000" \
+]

@@ -1,0 +1,10 @@
+script: "src/vla_eval/model_servers/molmoact2.py"
+args:
+  hf_repo: "allenai/MolmoAct2-LIBERO"
+  # norm_tag: auto-detected from norm_stats.json when empty.
+  # After downloading the checkpoint, inspect norm_stats.json to find the correct key
+  # and set it here explicitly.
+  norm_tag: ""
+  state_dim: 0
+  chunk_size: 10
+  port: 8000

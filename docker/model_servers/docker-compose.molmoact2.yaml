@@ -1,0 +1,67 @@
+name: vla-eval-molmoact2
+# MolmoAct2 model server + LIBERO benchmark — combined stack.
+#
+# Full eval (molmoact2 waits to load, then libero starts automatically):
+#   docker compose -f docker/model_servers/docker-compose.molmoact2.yaml up
+#
+# Model server only (run the benchmark separately on the host):
+#   docker compose -f docker/model_servers/docker-compose.molmoact2.yaml up molmoact2-server
+
+services:
+  molmoact2-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-molmoact2:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.molmoact2
+    ports:
+      - "8000:8000"
+    command:
+      - --hf_repo
+      - allenai/MolmoAct2-LIBERO
+      - --chunk_size
+      - "10"
+      - --port
+      - "8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      HF_TOKEN: "${HF_TOKEN:-}"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 600s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      molmoact2-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/10.yaml
+      - --server-url
+      - ws://molmoact2-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

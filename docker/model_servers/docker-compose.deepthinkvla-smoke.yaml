@@ -1,0 +1,20 @@
+name: vla-eval-deepthinkvla-smoke
+# DeepThinkVLA smoke stack. Uses quick LIBERO config.
+
+services:
+  deepthinkvla-server:
+    extends:
+      file: docker-compose.deepthinkvla.yaml
+      service: deepthinkvla-server
+
+  libero:
+    extends:
+      file: docker-compose.deepthinkvla.yaml
+      service: libero
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/quick.yaml
+      - --server-url
+      - ws://deepthinkvla-server:8000
+      - -y

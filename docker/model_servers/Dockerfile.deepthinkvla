@@ -1,0 +1,72 @@
+# DeepThinkVLA model server image.
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.deepthinkvla \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-deepthinkvla:local \
+#     .
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    TOKENIZERS_PARALLELISM=false \
+    DEEPTHINKVLA_REPO=/opt/DeepThinkVLA
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates libglib2.0-0 libgl1 libegl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+ARG DEEPTHINKVLA_REF=main
+RUN git clone --depth 1 --branch ${DEEPTHINKVLA_REF} https://github.com/OpenBMB/DeepThinkVLA.git ${DEEPTHINKVLA_REPO}
+
+# Warm large third-party deps before copying local source so repo/config edits do not
+# force re-downloading torch/CUDA wheels.
+RUN uv run --python 3.10 --no-project \
+    --with "torch==2.4.0" \
+    --with "torchvision==0.19.0" \
+    --with "transformers==4.48.1" \
+    --with "tokenizers==0.21.1" \
+    --with "huggingface_hub==0.29.3" \
+    --with "safetensors" \
+    --with "sentencepiece==0.2.0" \
+    --with "pillow" \
+    --with "numpy==1.26.4" \
+    --with "timm==1.0.3" \
+    --with "peft" \
+    --with "accelerate" \
+    --with "draccus==0.10.0" \
+    --with "einops==0.8.0" \
+    --with "opencv-python-headless==4.9.0.80" \
+    --with "swanlab" \
+    python -c "import torch; import transformers; import timm"
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_deepthinkvla.sh docker/model_servers/entrypoint_deepthinkvla.sh
+RUN chmod +x docker/model_servers/entrypoint_deepthinkvla.sh
+
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+RUN uv run --python 3.10 src/vla_eval/model_servers/deepthinkvla.py --help \
+    && rm -rf ~/.cache/pip
+
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_deepthinkvla.sh"]
+CMD [ \
+    "--checkpoint",          "yinchenghust/deepthinkvla_libero_cot_rl", \
+    "--repo_path",           "/opt/DeepThinkVLA", \
+    "--num_images_in_input", "2", \
+    "--max_new_tokens",      "2048", \
+    "--compute_dtype",       "bfloat16", \
+    "--img_resize_size",     "224", \
+    "--inference_mode",      "full_cot", \
+    "--chunk_size",          "10", \
+    "--port",                "8000" \
+]

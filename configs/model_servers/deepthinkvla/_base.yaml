@@ -1,0 +1,11 @@
+# DeepThinkVLA model server base config
+script: "src/vla_eval/model_servers/deepthinkvla.py"
+args:
+  repo_path: /opt/DeepThinkVLA
+  num_images_in_input: 2
+  max_new_tokens: 2048
+  compute_dtype: bfloat16
+  img_resize_size: 224
+  inference_mode: full_cot
+  chunk_size: 10
+  port: 8000

@@ -1,0 +1,4 @@
+# DeepThinkVLA — LIBERO checkpoint
+extends: _base.yaml
+args:
+  checkpoint: yinchenghust/deepthinkvla_libero_cot_rl

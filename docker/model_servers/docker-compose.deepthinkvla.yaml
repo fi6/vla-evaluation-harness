@@ -1,0 +1,82 @@
+name: vla-eval-deepthinkvla
+# DeepThinkVLA model server + LIBERO-10 benchmark.
+#
+# Full eval:
+#   docker compose -f docker/model_servers/docker-compose.deepthinkvla.yaml up --build
+#
+# Smoke / quick check:
+#   docker compose -f docker/model_servers/docker-compose.deepthinkvla.yaml up --build deepthinkvla-server
+#   docker compose -f docker/model_servers/docker-compose.deepthinkvla.yaml run --rm libero run --config /workspace/configs/benchmarks/libero/quick.yaml --server-url ws://deepthinkvla-server:8000 -y
+
+services:
+  deepthinkvla-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-deepthinkvla:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.deepthinkvla
+    ports:
+      - "8000:8000"
+    command:
+      - --checkpoint
+      - yinchenghust/deepthinkvla_libero_cot_rl
+      - --repo_path
+      - /opt/DeepThinkVLA
+      - --num_images_in_input
+      - "2"
+      - --max_new_tokens
+      - "2048"
+      - --compute_dtype
+      - bfloat16
+      - --img_resize_size
+      - "224"
+      - --inference_mode
+      - full_cot
+      - --chunk_size
+      - "10"
+      - --port
+      - "8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      HF_HUB_DISABLE_XET: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      SWANLAB_MODE: disabled
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      deepthinkvla-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/10.yaml
+      - --server-url
+      - ws://deepthinkvla-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

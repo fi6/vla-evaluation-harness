@@ -1,0 +1,62 @@
+# SimVLA model server image.
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    TOKENIZERS_PARALLELISM=false
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates libglib2.0-0 libgl1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+ARG SIMVLA_REF=main
+RUN git clone --depth 1 --branch ${SIMVLA_REF} https://github.com/LUOyk1999/SimVLA.git /opt/SimVLA
+
+RUN uv run --python 3.10 --no-project \
+    --with "torch==2.4.0" \
+    --with "torchvision==0.19.0" \
+    --with "transformers>=4.57.0,<5" \
+    --with "accelerate" \
+    --with "safetensors" \
+    --with "pillow" \
+    --with "numpy" \
+    --with "huggingface_hub" \
+    --with "opencv-python-headless" \
+    --with "fastapi" \
+    --with "uvicorn" \
+    --with "json-numpy" \
+    --with "scipy" \
+    --with "einops" \
+    --with "timm" \
+    --with "num2words" \
+    --with "av" \
+    python -c "import torch; import transformers; import cv2"
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_simvla.sh docker/model_servers/entrypoint_simvla.sh
+RUN chmod +x docker/model_servers/entrypoint_simvla.sh
+
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+RUN uv run --python 3.10 python -m py_compile src/vla_eval/model_servers/simvla.py \
+    && rm -rf ~/.cache/pip
+
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_simvla.sh"]
+CMD [ \
+    "--checkpoint",     "YuankaiLuo/SimVLA-LIBERO", \
+    "--repo_path",      "/opt/SimVLA", \
+    "--smolvlm_model",  "HuggingFaceTB/SmolVLM-500M-Instruct", \
+    "--device",         "cuda", \
+    "--action_horizon", "10", \
+    "--replan_steps",   "5", \
+    "--port",           "8000" \
+]

@@ -1,0 +1,20 @@
+name: vla-eval-simvla-smoke
+# SimVLA smoke stack. Uses quick LIBERO config.
+
+services:
+  simvla-server:
+    extends:
+      file: docker-compose.simvla.yaml
+      service: simvla-server
+
+  libero:
+    extends:
+      file: docker-compose.simvla.yaml
+      service: libero
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/quick.yaml
+      - --server-url
+      - ws://simvla-server:8000
+      - -y

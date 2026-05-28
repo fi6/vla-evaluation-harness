@@ -1,0 +1,6 @@
+# SimVLA model server — LIBERO checkpoint
+# Weight: YuankaiLuo/SimVLA-LIBERO (Hugging Face)
+# Benchmark: LIBERO
+extends: _base.yaml
+args:
+  checkpoint: YuankaiLuo/SimVLA-LIBERO

@@ -1,0 +1,10 @@
+# SimVLA model server — shared base
+script: "src/vla_eval/model_servers/simvla.py"
+args:
+  port: 8000
+  checkpoint: YuankaiLuo/SimVLA-LIBERO
+  repo_path: /opt/SimVLA
+  smolvlm_model: HuggingFaceTB/SmolVLM-500M-Instruct
+  device: cuda
+  action_horizon: 10
+  replan_steps: 5

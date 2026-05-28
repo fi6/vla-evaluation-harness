@@ -1,0 +1,73 @@
+name: vla-eval-simvla
+# SimVLA model server + LIBERO-10 benchmark.
+#
+# Full eval:
+#   docker compose -f docker/model_servers/docker-compose.simvla.yaml up --build
+
+services:
+  simvla-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-simvla:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.simvla
+    ports:
+      - "8000:8000"
+    command:
+      - --checkpoint
+      - YuankaiLuo/SimVLA-LIBERO
+      - --repo_path
+      - /opt/SimVLA
+      - --smolvlm_model
+      - HuggingFaceTB/SmolVLM-500M-Instruct
+      - --device
+      - cuda
+      - --action_horizon
+      - "10"
+      - --replan_steps
+      - "5"
+      - --port
+      - "8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      HF_HUB_DISABLE_XET: "1"
+      TOKENIZERS_PARALLELISM: "false"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 15s
+      timeout: 10s
+      retries: 60
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      simvla-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/10.yaml
+      - --server-url
+      - ws://simvla-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

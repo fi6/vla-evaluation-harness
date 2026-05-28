@@ -21,6 +21,7 @@
 ### Latest News
 
 - [2026/05] [v0.2.0](https://github.com/allenai/vla-evaluation-harness/releases/tag/v0.2.0) released. 18 benchmarks x 13 model servers — the largest open VLA evaluation matrix. Browse [`configs/`](configs/) to get started.
+- [2026/05] LIBERO-10 reproductions complete: π₀ 95.2%, OFT 94.0%, GR00T N1.6 89.8%, OpenVLA 53.4%, StarVLA 21.4% (500 episodes each, 1× RTX 4090). See [Reproduction Reports](docs/reproductions/).
 - [2026/05] [Leaderboard](https://allenai.github.io/vla-evaluation-harness/leaderboard/) rebuilt: 1,885 models x 18 benchmarks, schema-validated pipeline, updated monthly.
 - [2026/04] [v0.1.0](https://github.com/allenai/vla-evaluation-harness/releases/tag/v0.1.0) released. 6 VLA models [reproduced](docs/reproductions/) within 2pp of published scores.
 - [2026/04] Batch parallel eval: 2,000 LIBERO episodes in 18 min on 1x H100 ([details](#batch-parallel-evaluation)).
@@ -69,7 +70,32 @@ uv sync --python 3.11 --all-extras --dev
 
 ## Quick Start
 
-Two terminals: one for the model server (GPU), one for the benchmark client.
+### Option A — Docker Compose (recommended)
+
+Each model server + benchmark runs as a single `docker compose up`. No separate terminals needed.
+
+```bash
+# π₀ + LIBERO-10 (full eval, 500 episodes)
+docker compose -f docker/model_servers/docker-compose.pi0.yaml up
+
+# OFT + LIBERO-10
+docker compose -f docker/model_servers/docker-compose.oft.yaml up
+
+# GR00T N1.6 + LIBERO-10
+docker compose -f docker/model_servers/docker-compose.groot.yaml up
+
+# OpenVLA + LIBERO-10
+docker compose -f docker/model_servers/docker-compose.openvla.yaml up
+
+# StarVLA + LIBERO-10
+docker compose -f docker/model_servers/docker-compose.starvla.yaml up
+```
+
+The model server healthchecks its `/config` endpoint; the benchmark starts automatically once
+the model is ready. Results land in `results/`. See [latency.md](latency.md) for per-model build
+commands, startup notes, and troubleshooting.
+
+### Option B — Two-terminal (host model server)
 
 ```bash
 # Terminal 1 — model server (runs on host with GPU)
@@ -79,15 +105,16 @@ vla-eval serve --config configs/model_servers/db_cogact/libero.yaml
 vla-eval run --config configs/benchmarks/libero/smoke_test.yaml
 ```
 
-Results are saved to `results/` as JSON. The benchmark runs inside Docker by default; pass `--no-docker` for local development.
+Results are saved to `results/` as JSON. Pass `--no-docker` to run the benchmark locally.
 
-For full evaluation (10 tasks x 50 episodes):
+For full evaluation (10 tasks × 50 episodes):
 
 ```bash
-vla-eval run --config configs/benchmarks/libero/spatial.yaml
+vla-eval run --config configs/benchmarks/libero/10.yaml
 ```
 
-Other benchmarks and models follow the same pattern. Pick a benchmark and a compatible model server from [`configs/`](configs/):
+Other benchmarks and models follow the same pattern — pick a benchmark and a compatible model
+server from [`configs/`](configs/):
 
 ```bash
 # SimplerEnv + X-VLA
@@ -99,9 +126,10 @@ vla-eval serve --config configs/model_servers/db_cogact/calvin.yaml
 vla-eval run --config configs/benchmarks/calvin/eval.yaml
 ```
 
-Each benchmark and model server directory has a README with setup details, supported configs, and Docker image info. See [Reproduction Reports](docs/reproductions/) for verified scores.
+Each benchmark and model server directory has a README with setup details, supported configs, and
+Docker image info. See [Reproduction Reports](docs/reproductions/) for verified scores.
 
-> **Need faster runs?** See [Batch Parallel Evaluation](#batch-parallel-evaluation) for up to 47x throughput.
+> **Need faster runs?** See [Batch Parallel Evaluation](#batch-parallel-evaluation) for up to 47× throughput.
 
 ---
 

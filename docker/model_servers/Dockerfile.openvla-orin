@@ -1,0 +1,50 @@
+# OpenVLA model server for Jetson Orin.
+#
+# This image is intentionally separate from Dockerfile.openvla so the existing
+# x86_64/CUDA path remains unchanged.
+#
+# Build from repo root:
+#   docker build -f docker/model_servers/Dockerfile.openvla-orin \
+#     -t jetson-openvla:orin .
+
+ARG BASE_IMAGE=jetson-openpi-torch:pi0-orin
+FROM ${BASE_IMAGE}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=all \
+    HF_HUB_ENABLE_HF_TRANSFER=0 \
+    PYTHONPATH=/workspace/src
+
+WORKDIR /workspace
+
+# Reuse the verified Jetson PyTorch/cuDNN base and install only OpenVLA's
+# userspace dependencies. Do not ask pip to replace torch on Jetson.
+RUN python3 -m pip install --no-cache-dir \
+        "transformers==4.40.1" \
+        "tokenizers==0.19.1" \
+        "timm==0.9.10" \
+        "accelerate" \
+        "einops" \
+        "sentencepiece" \
+        "safetensors" \
+    && python3 -m pip cache purge
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/entrypoint_openvla_orin.py docker/model_servers/entrypoint_openvla_orin.py
+
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+ENTRYPOINT ["python3", "-u", "/workspace/docker/model_servers/entrypoint_openvla_orin.py"]
+CMD [ \
+    "--model_path", "openvla/openvla-7b-finetuned-libero-10", \
+    "--unnorm_key", "libero_10", \
+    "--chunk_size", "1", \
+    "--jpeg_roundtrip", \
+    "--center_crop", \
+    "--port", "8000" \
+]

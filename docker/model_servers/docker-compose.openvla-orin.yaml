@@ -1,0 +1,73 @@
+name: vla-eval-openvla-orin
+
+# OpenVLA on Jetson Orin.
+#
+# Model server:
+#   docker compose -f docker/model_servers/docker-compose.openvla-orin.yaml up openvla-server
+#
+# Synthetic smoke benchmark with latency JSON:
+#   docker compose -f docker/model_servers/docker-compose.openvla-orin.yaml --profile smoke up
+
+services:
+  openvla-server:
+    image: jetson-openvla:orin
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.openvla-orin
+    runtime: nvidia
+    ports:
+      - "8000:8000"
+    command:
+      - --model_path
+      - openvla/openvla-7b-finetuned-libero-10
+      - --unnorm_key
+      - libero_10
+      - --chunk_size
+      - "1"
+      - --jpeg_roundtrip
+      - --center_crop
+      - --port
+      - "8000"
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      PYTHONPATH: /workspace/src
+    volumes:
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface
+      - ../../results:/workspace/results
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python3",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/config', timeout=5).read()",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 120
+      start_period: 300s
+
+  latency-smoke:
+    image: jetson-openvla:orin
+    profiles: ["smoke"]
+    depends_on:
+      openvla-server:
+        condition: service_healthy
+    entrypoint: ["python3", "-u", "/workspace/tools/latency_smoke_client.py"]
+    command:
+      - --url
+      - ws://openvla-server:8000
+      - --steps
+      - "3"
+      - --image-size
+      - "256"
+      - --state-dim
+      - "8"
+      - --task
+      - pick up the object
+      - --output
+      - /workspace/results/latency/openvla-orin-smoke-client.json
+    volumes:
+      - ../../tools:/workspace/tools:ro
+      - ../../src:/workspace/src:ro
+      - ../../results:/workspace/results

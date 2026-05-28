@@ -1,5 +1,53 @@
 # Latency Testing Notes
 
+## Model Server Latency Logs
+
+Model servers can record server-side latency with `ModelServer._log_latency()`.
+The log is buffered per episode and flushed only after a successful
+`EPISODE_END`, so failed episodes do not pollute latency summaries.
+
+Latency logs are JSONL files under `results/`:
+
+```text
+results/<model>_<unix_ts>_latency.jsonl
+```
+
+Each row contains:
+
+```json
+{
+  "episode_id": "...",
+  "step": 10,
+  "preprocess_ms": 1.23,
+  "infer_ms": 181.45,
+  "success": true
+}
+```
+
+Generate a short synthetic episode against any running model server:
+
+```bash
+python3 tools/latency_smoke_client.py \
+  --url ws://127.0.0.1:8000 \
+  --steps 11 \
+  --output results/latency_smoke_roundtrip.json
+```
+
+The smoke client records client-side round-trip latency in its output JSON.
+The server writes the authoritative model-side `*_latency.jsonl` file when it
+receives `EPISODE_END`.
+
+Summarize one or more server latency logs into profile-style JSON:
+
+```bash
+python3 tools/latency_summary.py results/*_latency.jsonl \
+  --drop-first-step \
+  --output results/latency_summary.json
+```
+
+Use `--drop-first-step` for servers that do one-time prompt setup, calibration,
+CUDA graph capture, or cache warmup on the first observation.
+
 ## Local Docker Image Build
 
 ### Problem

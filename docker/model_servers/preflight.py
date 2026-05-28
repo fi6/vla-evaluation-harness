@@ -19,6 +19,7 @@ snapshot already exists there, no download is attempted.
 
 from __future__ import annotations
 
+import argparse
 import logging
 import os
 import sys
@@ -43,23 +44,29 @@ def _hf_cache_root() -> Path:
     return Path.home() / ".cache" / "huggingface"
 
 
-def _is_cached(repo_id: str) -> bool:
-    """Return True if at least one complete snapshot of *repo_id* exists locally."""
-    hub_dir = _hf_cache_root() / "hub"
-    repo_dir = hub_dir / ("models--" + repo_id.replace("/", "--"))
-    snapshots_dir = repo_dir / "snapshots"
-    if not snapshots_dir.is_dir():
-        return False
-    # A snapshot directory must be non-empty (incomplete downloads leave only .lock files).
-    for snap in snapshots_dir.iterdir():
-        if snap.is_dir() and any(f for f in snap.iterdir() if not f.name.endswith(".lock")):
-            return True
-    return False
-
-
-def _download(repo_id: str) -> None:
-    """Download *repo_id* to the HF cache with retry. Raises on final failure."""
+def _is_cached(repo_id: str, required_files: list[str] | None = None) -> bool:
+    """Return True if Hugging Face can resolve a local snapshot with required files."""
     from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        snapshot_path = Path(snapshot_download(repo_id, local_files_only=True))
+    except LocalEntryNotFoundError:
+        return False
+    except FileNotFoundError:
+        return False
+    if required_files:
+        for relpath in required_files:
+            file_path = snapshot_path / relpath
+            if not file_path.exists():
+                log.info("Cache snapshot for %s is missing required file: %s", repo_id, relpath)
+                return False
+    return True
+
+
+def _download(repo_id: str, required_files: list[str] | None = None) -> None:
+    """Download *repo_id* to the HF cache with retry. Raises on final failure."""
+    from huggingface_hub import hf_hub_download, snapshot_download
 
     endpoint = os.environ.get("HF_ENDPOINT", "https://huggingface.co")
     log.info("Downloading  %s  via  %s", repo_id, endpoint)
@@ -67,7 +74,12 @@ def _download(repo_id: str) -> None:
     last_exc: Exception | None = None
     for attempt in range(1, _MAX_RETRIES + 1):
         try:
-            snapshot_download(repo_id)
+            if required_files:
+                for filename in required_files:
+                    log.info("Ensuring file: %s", filename)
+                    hf_hub_download(repo_id, filename=filename)
+            else:
+                snapshot_download(repo_id)
             log.info("Download complete: %s", repo_id)
             return
         except Exception as exc:
@@ -92,8 +104,18 @@ def _download(repo_id: str) -> None:
     )
 
 
-def main(repos: list[str]) -> None:
-    if not repos:
+def main(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("repos", nargs="*", help="Hugging Face model repo ids to preflight")
+    parser.add_argument(
+        "--require",
+        action="append",
+        default=[],
+        help="Relative file path that must exist in each local snapshot (repeatable).",
+    )
+    args = parser.parse_args(argv)
+
+    if not args.repos:
         log.info("No repos specified — nothing to check.")
         return
 
@@ -101,8 +123,8 @@ def main(repos: list[str]) -> None:
     log.info("HF_ENDPOINT = %s", endpoint)
     log.info("Cache root  = %s", _hf_cache_root())
 
-    missing = [r for r in repos if not _is_cached(r)]
-    present = [r for r in repos if r not in missing]
+    missing = [r for r in args.repos if not _is_cached(r, args.require)]
+    present = [r for r in args.repos if r not in missing]
 
     for repo in present:
         log.info("✓ Found in cache: %s", repo)
@@ -118,7 +140,10 @@ def main(repos: list[str]) -> None:
     log.info("")
 
     for repo in missing:
-        _download(repo)
+        _download(repo, args.require)
+        if args.require and not _is_cached(repo, args.require):
+            missing_files = ", ".join(args.require)
+            raise RuntimeError(f"Downloaded {repo}, but required files are still incomplete: {missing_files}")
 
     log.info("All models ready.")
 

@@ -1,0 +1,42 @@
+# DB-CogACT model server image (Dexmal/libero-db-cogact via dexbotic package).
+#
+# Build from repo root:
+#   docker build \
+#     -f docker/model_servers/Dockerfile.db_cogact \
+#     -t ghcr.io/allenai/vla-evaluation-harness/model-server-db-cogact:local \
+#     .
+
+FROM nvcr.io/nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    NVIDIA_DRIVER_CAPABILITIES=all
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+WORKDIR /workspace
+
+COPY pyproject.toml README.md ./
+COPY src/ src/
+COPY configs/ configs/
+COPY docker/model_servers/preflight.py docker/model_servers/preflight.py
+COPY docker/model_servers/entrypoint_db_cogact.sh docker/model_servers/entrypoint_db_cogact.sh
+RUN chmod +x docker/model_servers/entrypoint_db_cogact.sh
+
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+
+# Pre-install all dependencies declared in dexbotic/cogact.py's inline metadata.
+RUN uv run --python 3.11 src/vla_eval/model_servers/dexbotic/cogact.py --help \
+    && rm -rf ~/.cache/pip
+
+ENTRYPOINT ["/workspace/docker/model_servers/entrypoint_db_cogact.sh"]
+CMD [ \
+    "--model_path",   "Dexmal/libero-db-cogact", \
+    "--chunk_size_map", "{\"libero_spatial\": 12, \"libero_object\": 16, \"libero_goal\": 16, \"libero_10\": 15}", \
+    "--port",         "8000" \
+]

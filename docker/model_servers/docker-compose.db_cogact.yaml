@@ -1,0 +1,69 @@
+name: vla-eval-db-cogact
+# DB-CogACT model server + LIBERO-10 benchmark — combined stack.
+#
+# Full eval:
+#   docker compose -f docker/model_servers/docker-compose.db_cogact.yaml up
+#
+# Model server only:
+#   docker compose -f docker/model_servers/docker-compose.db_cogact.yaml up db-cogact-server
+
+services:
+  db-cogact-server:
+    image: ghcr.io/allenai/vla-evaluation-harness/model-server-db-cogact:local
+    build:
+      context: ../..
+      dockerfile: docker/model_servers/Dockerfile.db_cogact
+    command:
+      - --model_path
+      - Dexmal/libero-db-cogact
+      - --chunk_size_map
+      - '{"libero_spatial": 12, "libero_object": 16, "libero_goal": 16, "libero_10": 15}'
+      - --use_text_template
+      - --port
+      - "8000"
+    ports:
+      - "8000:8000"
+
+    environment:
+      HF_ENDPOINT: "${HF_ENDPOINT:-https://huggingface.co}"
+      HF_TOKEN: "${HF_TOKEN:-}"
+    volumes:
+      - ~/.cache/huggingface:/root/.cache/huggingface
+      - ~/.triton:/root/.triton
+      - ../../results:/workspace/results
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/config"]
+      interval: 10s
+      timeout: 5s
+      retries: 36
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu]
+
+  libero:
+    image: ghcr.io/allenai/vla-evaluation-harness/libero:local
+    depends_on:
+      db-cogact-server:
+        condition: service_healthy
+    command:
+      - run
+      - --config
+      - /workspace/configs/benchmarks/libero/10.yaml
+      - --server-url
+      - ws://db-cogact-server:8000
+      - -y
+    volumes:
+      - ../../results:/workspace/results
+      - ../../configs:/workspace/configs:ro
+    environment:
+      NVIDIA_DRIVER_CAPABILITIES: all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [gpu, graphics, utility, compute]

@@ -1,0 +1,43 @@
+ARG BASE_IMAGE=ghcr.io/allenai/vla-evaluation-harness/base-orin:local
+FROM ${BASE_IMAGE}
+
+RUN conda create -n libero python=3.8 pip -y && conda clean -afy
+SHELL ["conda", "run", "-n", "libero", "/bin/bash", "-c"]
+
+# PyPI CPU PyTorch wheels are x86_64-only; conda provides aarch64 packages.
+RUN conda install -n libero -y pytorch cpuonly -c pytorch -c conda-forge \
+    && conda clean -afy
+
+# h5py/scipy/numpy are less fragile on Jetson when their system libraries come
+# from conda-forge instead of a local wheel build.
+RUN conda install -n libero -y -c conda-forge \
+        h5py numpy scipy matplotlib \
+    && conda clean -afy
+
+RUN uv pip install --no-cache-dir \
+        mujoco==3.2.3 robosuite==1.4.0 bddl==1.0.1 \
+        Pillow pyyaml termcolor future easydict hydra-core \
+        "gym>=0.21,<0.27" \
+    && rm -rf ~/.cache/pip ~/.cache/uv
+
+RUN git clone --depth 1 https://github.com/Lifelong-Robot-Learning/LIBERO.git /app/libero \
+    && cd /app/libero && pip install --no-cache-dir -e . \
+    && rm -rf /app/libero/.git ~/.cache/pip
+
+RUN mkdir -p /root/.libero && printf '\
+benchmark_root: /app/libero/libero/libero\n\
+bddl_files: /app/libero/libero/libero/bddl_files\n\
+init_states: /app/libero/libero/libero/init_files\n\
+datasets: /app/libero/libero/datasets\n\
+assets: /app/libero/libero/libero/assets\n' > /root/.libero/config.yaml
+
+WORKDIR /workspace
+COPY pyproject.toml README.md ./
+COPY src/ src/
+ARG HARNESS_VERSION=0.0.0
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${HARNESS_VERSION}
+RUN uv pip install --no-cache-dir -e .
+COPY configs/ configs/
+
+ENTRYPOINT ["conda", "run", "--no-capture-output", "-n", "libero", "vla-eval"]
+CMD ["run", "--config", "/workspace/configs/libero_spatial.yaml"]
